@@ -1,0 +1,13 @@
+<tag attr="val">
+  <tag attr="val" attr="val2">
+    <tag attr="val" attr2="val2">
+    </tag>
+  </tag>
+</tag>
+
+<tag/>
+<tag attr/>
+<tag attr="val"/>
+<tag attr='val'/>
+<tag attr="va'l"/>
+<tag attr='va"l'/>
