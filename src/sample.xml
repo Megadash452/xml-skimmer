@@ -4,10 +4,14 @@
     </tag>
   </tag>
 </tag>
-
+<!--Comment-->
 <tag/>
 <tag attr/>
 <tag attr="val"/>
 <tag attr='val'/>
 <tag attr="va'l"/>
 <tag attr='va"l'/>
+<tag attr= "val"/>
+<tag attr ="val"/>
+<tag attr = "val"/>
+<tag attr attr2/>

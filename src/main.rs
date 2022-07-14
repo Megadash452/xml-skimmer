@@ -7,6 +7,13 @@ fn main() {
 
 
 pub fn parse_xml(xml_src: &str) {
+    let mut handlers: HashMap<String, Box<dyn FnOnce()>> = HashMap::new();
+    handlers.insert(String::from("Amogus"), Box::new(|| {
+
+    }));
+
+
+
     let mut stack: Vec<ParsedNode> = vec![];
     // Node parser is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
     let mut current_node = ParsedNode::new();
@@ -21,15 +28,10 @@ pub fn parse_xml(xml_src: &str) {
     let mut indent_level: u32 = 0;
     const INDENT_AMOUNT: u32 = 4;
 
-
-    for character in xml_src.chars() {
-        // Anything goes in an attribute value (except `"` or `'`)
-        if writing_to == WriteTo::AttrVal && character != '"' && character != '\'' {
-            current_attr.value.push(character);
-            continue;
-        }
+    let mut iter = xml_src.chars();
+    while let Some(character) = iter.next() {
         // Anything goes in a TextNode (except `<`)
-        else if writing_to == WriteTo::Content && character != '<' {
+        if writing_to == WriteTo::Content && character != '<' {
             // TODO: write text content
             continue;
         }
@@ -40,7 +42,28 @@ pub fn parse_xml(xml_src: &str) {
                 node_type = NodeType::Opening;
                 writing_to = WriteTo::Tag;
 
-                // TODO: Detect comment node
+                /* Check if the next 3 characters are !-- to initiate a comment.
+                   Save a slice of the remaining characters after !-- */
+                if let Some(remaining) = iter.as_str().strip_prefix("!--") {
+                    println!("Comment Start");
+                    /* Look for the end-of-comment delimeter (-->) */
+                    let remaining = match remaining.split_once("-->") {
+                        Some(pair) => {
+                            // print comment content
+                            println!("    {}", pair.0);
+                            pair.1
+                        }
+                        None => {
+                            // The rest of xml_src is the comment
+                            eprintln!("Unclosed comment:\n -> {}\n...will be ignored.", remaining);
+                            break;
+                        }
+                    };
+
+                    // skip the comment and its delimeters
+                    iter = remaining.chars();
+                    println!("Comment Stop");
+                }
             }
             // Change OPENING_NODE to CLOSING_NODE
             '/' => {
@@ -68,6 +91,7 @@ pub fn parse_xml(xml_src: &str) {
                 match node_type {
                     NodeType::Opening | NodeType::SelfClosing => {
                         // TODO: check if tag and attrs match the selector, then call handler
+                        // Check if any of the keys of Hashmap match the current_node as CSS Selector
                     }
                     _ => {}
                 }
@@ -110,7 +134,7 @@ pub fn parse_xml(xml_src: &str) {
                 node_type = NodeType::None;
             }
             
-            ' ' | '\n' => {
+            ' ' | '\n' | '\t' => {
                 // Whitespace only matters in an OPENING_NODE
                 if node_type == NodeType::Opening {
                     match writing_to {
@@ -119,10 +143,33 @@ pub fn parse_xml(xml_src: &str) {
                         // Push attr (if name not empty) to current_node (In case of duplicate attr, the last one read will remain)
                         // Case of Boolean Attributes (e.g.: <tag attr1 attr2>)
                         WriteTo::AttrName => {
-                            if current_attr.name != "" {
-                                current_node.attributes.insert(current_attr.name, current_attr.value);
-                                current_attr = Attr::new();
+                            // Look for the equal sign (=) before hitting any other char (except whitespace)
+                            let mut i = iter.as_str().chars();
+                            while let Some(c) = i.next() {
+                                match c {
+                                    // Equal sign (=) means to begin AttrVal
+                                    '=' => {
+                                        writing_to = WriteTo::AttrVal;
+                                        break;
+                                    }
+                                    // Ignore whitespace
+                                    ' ' | '\n' | '\t' => {  }
+                                    // A different attribute has been reached
+                                    _ => {
+                                        // Only push attribute if it exists
+                                        if !current_attr.name.is_empty() {
+                                            // Attr will have an empty value
+                                            current_node.attributes.insert(current_attr.name, String::new());
+                                            current_attr = Attr::new();
+                                        }
+                                        // add this character to the new attribute, as it will be skipped by the iterator
+                                        current_attr.name.push(c);
+                                        break;
+                                    }
+                                }
                             }
+                            // skip the chars that have already been parsed
+                            iter = i;
                         }
                         _ => {}
                     }
@@ -131,59 +178,48 @@ pub fn parse_xml(xml_src: &str) {
             // Switch from writing to attr.name -> writing to attr.value
             '=' => {
                 // = Only allowed to separate AttrName and AttrVal, when writing AttrVal, and text Content
-                match node_type {
-                    NodeType::Opening =>
-                        match writing_to {
-                            WriteTo::AttrName => writing_to = WriteTo::AttrVal,
-                            // WriteTo::AttrVal will never be reached here
-                            _ => panic!("Equal_Sign (=) not supposed to be here!")
-                        }
-                    NodeType::Closing => panic!("Equal_Sign (=) not supposed to be here!"),
-                    _ => {}
+                // WriteTo::AttrVal and WriteTo::Content will never be reached here
+                if node_type == NodeType::Opening && writing_to == WriteTo::AttrName {
+                    writing_to = WriteTo::AttrVal;
+                } else {
+                    panic!("Equal_Sign (=) not supposed to be here!");
                 }
             }
             // Switch from writing to attr.val -> writing to attr.name
             '"' | '\'' => {
-                let char_0 = current_attr.value.chars().nth(0);
-                // quotes (single or double) should only be used in AttrVal and text Content
+                // Quotes (single or double) should only be used in AttrVal and text Content
                 match writing_to  {
-                    WriteTo::AttrVal =>
-                        // attr.val must have at least 1st char as a quote
-                        // Both are either single (') or double (") quote
-                        if char_0 == Some(character) {
-                            // The first " must be removed, since its only purpose is being a delimeter
-                            current_attr.value.remove(0);
-                            writing_to = WriteTo::AttrName;
-                            // Push attr to current_node (In case of duplicate attr, the last one read will remain)
-                            current_node.attributes.insert(current_attr.name, current_attr.value);
-                            // reset
-                            current_attr = Attr::new();
-                        }
-                        // char_0 and character are different
-                        else if char_0 == Some('"') ||
-                                char_0 == Some('\'') ||
-                        // Otherwise (if empty) it indicates that parser just started reading AttrVal
-                                current_attr.value == "" {
-                            /* Put the quote as 1st char for the next time parser encounters the same type of quote,
-                            in which case it means the end of the AttrVal. */
-                            current_attr.value.push(character);
-                        }
-                        // If attr_val is not empty and 1st char is not either type of quote, it means an error occurred
-                        else {
-                            panic!("Something went wrong reading value of attr {} in {} node", current_attr.name, current_node);
-                        }
+                    WriteTo::AttrVal => {
+                        // AttrVal starts at the quote, and should end at the next quote of the same type (single or double)
+                        // Start and end quotes are ignored
+                        let remaining = match iter.as_str().split_once(character) {
+                            Some((attr_val, remaining)) => {
+                                // AttrVal is the slice before the end quote
+                                current_node.attributes.insert(current_attr.name, String::from(attr_val));
+                                remaining
+                            }
+                            None => {
+                                panic!("Value of attribute {} in node {} has no end quote (perhaps wrong quote was used to close). Cannot close node.", current_attr.name, current_node);
+                            }
+                        };
+                        // Finished reading AttrVal, proceed to next Attr
+                        current_attr = Attr::new();
+                        writing_to = WriteTo::AttrName;
+                        // skip iteration of AttrVal; continue over the rest of the xml_src
+                        iter = remaining.chars();
+                    }
                     // WriteTo::Content will never be reached here
                     _ => panic!("Quotes (single or double) not suppoed to be here!")
                 }
             }
             
-            // TODO: add support for comment node
             _ => {
                 match writing_to {
                     WriteTo::Tag => current_node.tag.push(character),
                     WriteTo::AttrName => current_attr.name.push(character),
                     // WriteTo::AttrVal will never be reached here
-                    _ => todo!("TextNode Content")
+                    // WriteTo::Content will never be reached here
+                    _ => panic!("This should have not been reached")
                 }
             }    
         }
@@ -215,7 +251,7 @@ enum NodeType {
 
 #[derive(PartialEq, Eq)]
 enum WriteTo {
-    Tag, AttrName, AttrVal, Content
+    Tag, AttrName, AttrVal, Content, None
 }
 
 // struct TextNode {
