@@ -251,7 +251,7 @@ enum NodeType {
 
 #[derive(PartialEq, Eq)]
 enum WriteTo {
-    Tag, AttrName, AttrVal, Content, None
+    Tag, AttrName, AttrVal, Content
 }
 
 // struct TextNode {
