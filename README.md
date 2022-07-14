@@ -7,12 +7,10 @@ Tested the program running with the [benchmark](src/benchmark.xml) source file, 
 
 (using `time` command in Linux):
 ```
-real    0m0.830s
-user    0m0.094s
-sys     0m0.046s
+real    0m1.311s
+user    0m0.435s
+sys     0m0.151s
 ```
-
-(felt like just under 3 seconds)
 
 ## TODO list:
 Things that work:
