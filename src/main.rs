@@ -144,9 +144,8 @@ pub fn parse_xml(xml_src: &str) {
                         // Case of Boolean Attributes (e.g.: <tag attr1 attr2>)
                         WriteTo::AttrName => {
                             // Look for the equal sign (=) before hitting any other char (except whitespace)
-                            let mut i = iter.as_str().chars();
-                            while let Some(c) = i.next() {
-                                match c {
+                            while let Some(character) = iter.next() {
+                                match character {
                                     // Equal sign (=) means to begin AttrVal
                                     '=' => {
                                         writing_to = WriteTo::AttrVal;
@@ -163,13 +162,11 @@ pub fn parse_xml(xml_src: &str) {
                                             current_attr = Attr::new();
                                         }
                                         // add this character to the new attribute, as it will be skipped by the iterator
-                                        current_attr.name.push(c);
+                                        current_attr.name.push(character);
                                         break;
                                     }
                                 }
                             }
-                            // skip the chars that have already been parsed
-                            iter = i;
                         }
                         _ => {}
                     }
