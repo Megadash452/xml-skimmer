@@ -3,7 +3,13 @@ use selector::ParsedNode;
 use std::collections::HashMap;
 
 fn main() {
-    parse_xml(include_str!("sample.xml"));
+    let mut node_count = 0;
+    parse_xml(include_str!("sample.xml"), HashMap::from([
+        ("tag", |node: &ParsedNode| {
+            println!("Call successful for {}", node);
+            node_count += 1;
+        })
+    ]));
 
     // let n = ParsedNode{
     //     tag: String::from("tag"),
@@ -22,22 +28,14 @@ fn main() {
 }
 
 
-
-pub fn parse_xml(xml_src: &str) {
-    let mut handlers: HashMap<String, Box<dyn FnOnce()>> = HashMap::new();
-    handlers.insert(String::from("tag[attr]"), Box::new(|| {
-
-    }));
-
-
-
+/// Parse an xml source can call handler closures when a node that matches a selector is found.
+pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'static str, F>) {
     let mut stack: Vec<ParsedNode> = vec![];
     // Node parser is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
     let mut current_node = ParsedNode::new();
-    let mut current_attr = Attr::new(); // temporary attribute; will be added to the last ParsedNode
-   
+    // Temporary attribute; will be added to the last ParsedNode
+    let mut current_attr = Attr::new();
     let mut node_type = NodeType::None;
-
     // Whether the characters being read are appended to the tag, an attribute name, or an attribute value
     let mut writing_to = WriteTo::Content;
 
@@ -107,13 +105,12 @@ pub fn parse_xml(xml_src: &str) {
                 // Handlers: when a node has been parsed and some data needs to be read from it
                 match node_type {
                     NodeType::Opening | NodeType::SelfClosing => {
-                        // TODO: Check if any selector (keys in the HashMap) matches current_node
-                        // for (key, handler) in handlers.iter() {
-                        //     if selector::match_to_node(&current_node, key.as_str()) {
-                        //         println!("handle {}", current_node);
-                        //         // TODO: call handler (**handler)();
-                        //     }
-                        // }
+                        for (sel, handler) in handlers.iter_mut() {
+                            // Check if any selector (keys in the HashMap) matches current_node
+                            if selector::match_to_node(&current_node, *sel) || *sel == "*" {
+                                handler(&current_node);
+                            }
+                        }
                     }
                     _ => {}
                 }
