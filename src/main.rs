@@ -261,13 +261,10 @@ fn match_selector_to_node(node: &ParsedNode, selector: &str) -> bool {
         return false
     }
 
-    // ? Might use enumerate
     let mut iter = selector.chars();
     // The selector tag is optional
     let mut tag: Option<&str> = None;
-    // Each selector must have at most 1 id
-    let mut id_count = 0;
-    // i is the start of a selector object (tag, class, id, attr)
+    // The start of a selector object (tag, class, id, attr)
     let mut start: usize = 0;
 
     // Find selector tag (should be the first thing in the selector)
@@ -278,7 +275,7 @@ fn match_selector_to_node(node: &ParsedNode, selector: &str) -> bool {
                 return false
             }
             '.' | '#' | '[' => {
-                // slice selector up to one of . # [ (indexed by start)
+                // Slice selector up to one of . # [ (indexed by start)
                 tag = Some(&selector[0..start]);
                 // When tag is a &str not empty, match selector tag with node tag
                 if !tag.unwrap().is_empty() && tag.unwrap() != node.tag {
@@ -308,7 +305,7 @@ fn match_selector_to_node(node: &ParsedNode, selector: &str) -> bool {
         None => Vec::new()
     };
 
-    // j is the end of a selector object (tag, class, id, attr)
+    // The end of a selector object (tag, class, id, attr)
     let mut end: usize = start + 1;
     // Find class, id, other attributes
     while let Some(character) = iter.next() {
@@ -359,6 +356,7 @@ fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) ->
             // Close this attr part of selector
             match obj[1..].split_once(']') {
                 Some((attr, _)) =>
+                    // Separate attr_name and attr_val
                     match attr.split_once('=') {
                         Some((mut attr_name, mut attr_val)) => {
                             // Trim trailing whitespace from attr_name
@@ -384,10 +382,8 @@ fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) ->
                             }
                         }
                         // Check if attribute exists at all (with any value) in node
-                        None => {
-                            if node.attributes.get(attr) == None {
-                                return false
-                            }
+                        None => if node.attributes.get(attr) == None {
+                            return false
                         }
                     }
                 None => {
