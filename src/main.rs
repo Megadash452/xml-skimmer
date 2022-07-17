@@ -11,11 +11,11 @@ fn main() {
             (String::from("attr"),  String::from("val"))
         ])
     };
-    println!("{}", match_selector_to_node(&n, "tag"));
-    println!("{}", match_selector_to_node(&n, ".cls"));
-    println!("{}", match_selector_to_node(&n, "#id"));
-    println!("{}", match_selector_to_node(&n, "[attr=val]"));
-    println!("{}", match_selector_to_node(&n, "[attr=val]"));
+    // println!("{}", match_selector_to_node(&n, "tag"));
+    // println!("{}", match_selector_to_node(&n, ".cls"));
+    // println!("{}", match_selector_to_node(&n, "#id"));
+    // println!("{}", match_selector_to_node(&n, "[attr=val]"));
+    println!("{}", match_selector_to_node(&n, "tag#id.class.cls.c[attr=val]"));
     
 }
 
@@ -281,8 +281,8 @@ fn match_selector_to_node(node: &ParsedNode, selector: &str) -> bool {
                 // slice selector up to one of . # [ (indexed by start)
                 tag = Some(&selector[0..start]);
                 // When tag is a &str not empty, match selector tag with node tag
-                if !tag.unwrap().is_empty() {
-                    return tag.unwrap() == node.tag
+                if !tag.unwrap().is_empty() && tag.unwrap() != node.tag {
+                    return false
                 }
                 break;
             }
@@ -299,29 +299,6 @@ fn match_selector_to_node(node: &ParsedNode, selector: &str) -> bool {
         return selector == node.tag
     }
 
-    
-    // j is the end of a selector object (tag, class, id, attr)
-    let mut end: usize = start + 1;
-    // Find class, id, other attributes
-    while let Some(character) = iter.next() {
-        match character {
-            '.' | '#' | '[' => {
-                println!("s: {:?}", &selector[start..end]);
-                // TODO: i = j
-            }
-            _ => { }
-        }
-        end += 1;
-    }
-
-    // When reached the end of selector, do one more for the last obj
-    match_sel_obj_to_node(node, &selector[start..end])
-}
-
-
-/// Check if part of a css selector matches an attribute in node
-/// - E.g: Check if `obj = ".cls"` matches in `Node{ _, attrs: {"class": "... cls ..."} }`
-fn match_sel_obj_to_node(node: &ParsedNode, obj: &str) -> bool{
     // Get the classlist of the node
     let classlist: Vec<&str> = match node.attributes.get("class") {
         Some(list) => {
@@ -331,6 +308,31 @@ fn match_sel_obj_to_node(node: &ParsedNode, obj: &str) -> bool{
         None => Vec::new()
     };
 
+    // j is the end of a selector object (tag, class, id, attr)
+    let mut end: usize = start + 1;
+    // Find class, id, other attributes
+    while let Some(character) = iter.next() {
+        match character {
+            '.' | '#' | '[' => {
+                // println!("obj: {:?}", &selector[start..end]);
+                if !match_sel_obj_to_node(node, &selector[start..end], &classlist) {
+                    return false
+                }
+                start = end;
+            }
+            _ => { }
+        }
+        end += 1;
+    }
+
+    // When reached the end of selector, do one more for the last obj
+    match_sel_obj_to_node(node, &selector[start..end], &classlist)
+}
+
+
+/// Check if part of a css selector matches an attribute in node
+/// - E.g: Check if `obj = ".cls"` matches in `Node{ _, attrs: {"class": "... cls ..."} }`
+fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) -> bool{
     // First char of obj tells if it is class, id, or attr
     match obj.chars().nth(0) {
         // match selector classs with one of node classes
