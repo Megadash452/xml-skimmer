@@ -53,10 +53,8 @@ pub fn match_to_node(node: &ParsedNode, selector: &str) -> bool {
 
     // Get the classlist of the node
     let classlist: Vec<&str> = match node.attributes.get("class") {
-        Some(list) => {
-            // Classes are separated by space
-            list.split(' ').collect()
-        }
+        // Classes are separated by space
+        Some(list) => list.split(' ').collect(),
         None => Vec::new()
     };
 
@@ -66,7 +64,6 @@ pub fn match_to_node(node: &ParsedNode, selector: &str) -> bool {
     while let Some(character) = iter.next() {
         match character {
             '.' | '#' | '[' => {
-                // println!("obj: {:?}", &selector[start..end]);
                 if !match_sel_obj_to_node(node, &selector[start..end], &classlist) {
                     return false
                 }
@@ -87,7 +84,7 @@ pub fn match_to_node(node: &ParsedNode, selector: &str) -> bool {
 fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) -> bool{
     // First char of obj tells if it is class, id, or attr
     match obj.chars().nth(0) {
-        // match selector classs with one of node classes
+        // Match selector classs with one of node classes
         Some('.') => {
             if !classlist.contains(&&obj[1..]) {
                 return false
@@ -117,9 +114,9 @@ fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) ->
                             // Trim trailing whitespace from attr_name
                             attr_name = attr_name.trim_matches(' ');
 
-                            // Check if attribute exists at all (with any value) in node
+                            // Check if attr exists at all (with any value) in node
                             match node.attributes.get(attr_name) {
-                                // Check if attribute exists with specific value in node
+                                // Check if attr exists with specific value in node
                                 Some(val) => {
                                     // Trim trailing whitespace from attr_val
                                     attr_val = attr_val.trim_matches(' ');
@@ -136,7 +133,7 @@ fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) ->
                                 None => return false
                             }
                         }
-                        // Check if attribute exists at all (with any value) in node
+                        // Check if attr exists at all (with any value) in node
                         None => if node.attributes.get(attr) == None {
                             return false
                         }

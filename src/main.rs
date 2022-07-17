@@ -3,28 +3,29 @@ use selector::ParsedNode;
 use std::collections::HashMap;
 
 fn main() {
-    // parse_xml(include_str!("sample.xml"));
+    parse_xml(include_str!("sample.xml"));
 
-    let n = ParsedNode{
-        tag: String::from("tag"),
-        attributes: HashMap::from([
-            (String::from("class"), String::from("class cls c")),
-            (String::from("id"),    String::from("id")),
-            (String::from("attr"),  String::from("val"))
-        ])
-    };
+    // let n = ParsedNode{
+    //     tag: String::from("tag"),
+    //     attributes: HashMap::from([
+    //         (String::from("class"), String::from("class cls c")),
+    //         (String::from("id"),    String::from("id")),
+    //         (String::from("attr"),  String::from("val"))
+    //     ])
+    // };
     // println!("{}", selector::match_to_node(&n, "tag"));
     // println!("{}", selector::match_to_node(&n, ".cls"));
     // println!("{}", selector::match_to_node(&n, "#id"));
+    // println!("{}", selector::match_to_node(&n, "[attr]"));
     // println!("{}", selector::match_to_node(&n, "[attr=val]"));
-    println!("{}", selector::match_to_node(&n, "tag#id.class.cls.c[attr=val]"));
+    // println!("{}", selector::match_to_node(&n, "tag#id.class.cls.c[attr=val]"));
 }
 
 
 
 pub fn parse_xml(xml_src: &str) {
     let mut handlers: HashMap<String, Box<dyn FnOnce()>> = HashMap::new();
-    handlers.insert(String::from("Amogus"), Box::new(|| {
+    handlers.insert(String::from("tag[attr]"), Box::new(|| {
 
     }));
 
@@ -103,11 +104,16 @@ pub fn parse_xml(xml_src: &str) {
                     }
                 }
 
-                // Handlers
+                // Handlers: when a node has been parsed and some data needs to be read from it
                 match node_type {
                     NodeType::Opening | NodeType::SelfClosing => {
-                        // TODO: check if tag and attrs match the selector, then call handler
-                        // Check if any of the keys of Hashmap match the current_node as CSS Selector
+                        // TODO: Check if any selector (keys in the HashMap) matches current_node
+                        // for (key, handler) in handlers.iter() {
+                        //     if selector::match_to_node(&current_node, key.as_str()) {
+                        //         println!("handle {}", current_node);
+                        //         // TODO: call handler (**handler)();
+                        //     }
+                        // }
                     }
                     _ => {}
                 }
