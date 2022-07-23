@@ -20,6 +20,7 @@ fn main() {
     //     ])
     // };
     // println!("{}", selector::match_to_node(&n, "tag"));
+    // println!("{}", selector::match_to_node(&n, "tag, tag2"));
     // println!("{}", selector::match_to_node(&n, ".cls"));
     // println!("{}", selector::match_to_node(&n, "#id"));
     // println!("{}", selector::match_to_node(&n, "[attr]"));

@@ -1,5 +1,71 @@
 use std::{collections::HashMap, fmt::Display};
 
+/// Takes a css selector and splits it into subselectors which are comma-separated
+fn separate_commas(selector: &str) -> Vec<&str> {
+    // Stores the subselectors which will be returned
+    let mut rtrn: Vec<&str> = vec![];
+
+    // Commas inside strings (delimited by " or ') will be ignored
+    let mut in_str = false;
+
+    // start and end indices of the subselector &str
+    let mut start = 0;
+    let mut end = 0;
+
+    for character in selector.chars() {
+        match character {
+            // Toggle in_str state
+            '"' | '\'' => in_str = !in_str,
+            ',' => {
+                // Commas in strings are ignored
+                if !in_str {
+                    // Trim trailing whitespace before pushing
+                    rtrn.push(selector[start..end].trim_matches(' '));
+                    start = end + 1;
+                }
+            }
+            _ => {}
+        }
+
+        end += 1;
+    }
+
+    // Push the last subselector if it exists
+    let sub = selector[start..end].trim_matches(' ');
+    if !sub.is_empty() {
+        rtrn.push(sub);
+    }
+
+    rtrn
+}
+
+/// Get the slice that represents the tag in a css selector, and also the slice after
+/// - e.g.: `tag#id.cls[attr=val]` -> (`tag`, `#id.cls[attr=val]`)
+fn split_tag(selector: &str) -> (&str, &str) {
+    // The end index of the tag slice
+    let mut end = 0;
+
+    for character in selector.chars() {
+        match character {
+            ' ' | '\t' | '\n' => {
+                eprintln!("No whitespace allowed in selectors");
+                return ("", "")
+            }
+            // Split tag at the selector objects (cls, id, attr respectively)
+            '.' | '#' | '[' => {
+                return (&selector[..end], &selector[end..])
+            }
+            _ => { }
+        }
+
+        end += 1;
+    }
+
+    // The entire selector is the tag
+    return (selector, "")
+}
+
+
 /// Match a css selector to a node. Only supports `tag`, `#id`, `.class`, `[attr]`, `[attr="val"]`
 /// - The `tag` should be the first part of the selector, and is optional.
 /// - Then anything preceeded with `#` is an id. Looks for attribute `id` in node.
@@ -8,80 +74,73 @@ use std::{collections::HashMap, fmt::Display};
 ///   - `[attr]` checks if an attribute exists at all in node.
 ///   - `[attr="val"]` or checks that an attribute has the specified value in node.
 ///     - Aliases: `[attr='val']`, `[attr=val]`
+/// - Group multiple selectors into one by separating them with commas (,). If any of the selectors match the node, this fn will return true
+///   - e.g.: `tag.cls, tag2.cls2`
 /// <hr><br>
-/// Not allowed: empty selector, and whitespace (' ', \t, \n)
+/// Not allowed: empty selector, and Combinators (e.g.: `tag tag2` or `tag > tag2`)
 pub fn match_to_node(node: &ParsedNode, selector: &str) -> bool {
     if selector.is_empty() {
         eprintln!("Empty selectors are not valid");
         return false
     }
 
-    let mut iter = selector.chars();
-    // The selector tag is optional
-    let mut tag: Option<&str> = None;
-    // The start of a selector object (tag, class, id, attr)
-    let mut start: usize = 0;
+    // Match each subselector to node
+    'selectors: for selector in separate_commas(selector) {
+        // The tag of the selector, and rest of the selector
+        let (tag, rest) = split_tag(selector);
+        // Iterate over the characters after the tag of the selector
+        let mut iter = rest.chars();
+        // Tells if this tag matches the node's tag
+        let mut tag_match = false;
 
-    // Find selector tag (should be the first thing in the selector)
-    while let Some(character) = iter.next() {
-        match character {
-            ' ' | '\t' | '\n' => {
-                eprintln!("No whitespace allowed in selectors");
-                return false
-            }
-            '.' | '#' | '[' => {
-                // Slice selector up to one of . # [ (indexed by start)
-                tag = Some(&selector[0..start]);
-                // When tag is a &str not empty, match selector tag with node tag
-                if !tag.unwrap().is_empty() && tag.unwrap() != node.tag {
-                    return false
-                }
-                break;
-            }
-            _ => {}
+        // Match tag to node
+        // When selector doesn't have tag (i.e. tag is empty) it is considered as matching because the node tag is being ignored
+        if tag.is_empty() || tag == node.tag {
+            tag_match = true;
         }
-        // Set up start so that it is at the beginning of a . # or [
-        start += 1;
-    }
+        
+        // The start and end of a selector object (class, id, attr)
+        let mut start: usize = 0;
+        let mut end: usize = 1;
+        // Get the class attribute
+        let classlist = node.class_list();
 
-    // selector doesnt have . # or [
-    if tag == None {
-        // The entire selector is the tag
-        // Done with entire selector, no need to continue any further
-        return selector == node.tag
-    }
-
-    // Get the classlist of the node
-    let classlist: Vec<&str> = match node.attributes.get("class") {
-        // Classes are separated by space
-        Some(list) => list.split(' ').collect(),
-        None => Vec::new()
-    };
-
-    // The end of a selector object (tag, class, id, attr)
-    let mut end: usize = start + 1;
-    // Find class, id, other attributes
-    while let Some(character) = iter.next() {
-        match character {
-            '.' | '#' | '[' => {
-                if !match_sel_obj_to_node(node, &selector[start..end], &classlist) {
-                    return false
+        // The first character woulc be a ., #, or [, but it should be skipped because we want to look for the next one
+        iter.next();
+        // Find class, id, other attributes
+        for character in &mut iter {
+            match character {
+                '.' | '#' | '[' => {
+                    // If any attribute does not match (i.e. this fn returns false), then this subselector does not match
+                    if !match_sel_obj_to_node(node, &rest[start..end], &classlist) {
+                        // Move on to the next selector
+                        continue 'selectors;
+                    }
+                    start = end;
                 }
-                start = end;
+                _ => { }
             }
-            _ => { }
+            end += 1;
         }
-        end += 1;
+
+        // When reached the end of selector, do one more for the last obj
+        if tag_match && match_sel_obj_to_node(node, &rest[start..], &classlist) {
+            return true
+        }
     }
 
-    // When reached the end of selector, do one more for the last obj
-    match_sel_obj_to_node(node, &selector[start..end], &classlist)
+    false
 }
 
 
 /// Check if part of a css selector matches an attribute in node
 /// - E.g: Check if `obj = ".cls"` matches in `Node{ _, attrs: {"class": "... cls ..."} }`
 fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) -> bool{
+    // When obj is empty it is considered as matching because the selector ignores the node attributes
+    if obj.is_empty() {
+        return true
+    }
+
     // First char of obj tells if it is class, id, or attr
     match obj.chars().nth(0) {
         // Match selector classs with one of node classes
@@ -158,6 +217,13 @@ pub struct ParsedNode {
 impl ParsedNode {
     pub fn new() -> Self {
         Self{ tag: String::new(), attributes: HashMap::new() }
+    }
+    pub fn class_list(&self) -> Vec<&str> {
+        match self.attributes.get("class") {
+            // Classes are separated by space
+            Some(list) => list.split(' ').collect(),
+            None => Vec::new()
+        }
     }
 }
 impl Display for ParsedNode {
