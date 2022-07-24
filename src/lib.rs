@@ -2,30 +2,44 @@ mod selector;
 use selector::ParsedNode;
 use std::collections::HashMap;
 
-fn main() {
-    let mut node_count = 0;
-    parse_xml(include_str!("sample.xml"), HashMap::from([
-        ("tag", |node: &ParsedNode| {
-            println!("Call successful for {}", node);
-            node_count += 1;
-        })
-    ]));
+#[cfg(test)]
+mod tests {
+    use crate::HashMap;
+    use crate::selector;
 
-    // let n = ParsedNode{
-    //     tag: String::from("tag"),
-    //     attributes: HashMap::from([
-    //         (String::from("class"), String::from("class cls c")),
-    //         (String::from("id"),    String::from("id")),
-    //         (String::from("attr"),  String::from("val"))
-    //     ])
-    // };
-    // println!("{}", selector::match_to_node(&n, "tag"));
-    // println!("{}", selector::match_to_node(&n, "tag, tag2"));
-    // println!("{}", selector::match_to_node(&n, ".cls"));
-    // println!("{}", selector::match_to_node(&n, "#id"));
-    // println!("{}", selector::match_to_node(&n, "[attr]"));
-    // println!("{}", selector::match_to_node(&n, "[attr=val]"));
-    // println!("{}", selector::match_to_node(&n, "tag#id.class.cls.c[attr=val]"));
+    #[test]
+    fn css_selectors() {
+        use selector::{ParsedNode, match_to_node};
+        
+        let node = ParsedNode{
+            tag: String::from("tag"),
+            attributes: HashMap::from([
+                (String::from("class"), String::from("class cls c")),
+                (String::from("id"),    String::from("id")),
+                (String::from("attr"),  String::from("val"))
+            ])
+        };
+
+        assert_eq!(match_to_node(&node, "tag"), true);
+        assert_eq!(match_to_node(&node, "tag2, tag"), true);
+        assert_eq!(match_to_node(&node, ".cls"), true);
+        assert_eq!(match_to_node(&node, "#id"), true);
+        assert_eq!(match_to_node(&node, "[attr]"), true);
+        assert_eq!(match_to_node(&node, "[attr=val]"), true);
+        assert_eq!(match_to_node(&node, "tag#id.class.cls.c[attr=val]"), true);        
+    }
+
+    #[test]
+    fn parse_xml() {
+        let mut node_count = 0;
+        
+        crate::parse_xml(include_str!("sample.xml"), HashMap::from([
+            ("tag", |node: &selector::ParsedNode| {
+                println!("Call successful for {}", node);
+                node_count += 1;
+            })
+        ]));
+    }
 }
 
 
