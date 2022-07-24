@@ -1,8 +1,7 @@
 mod selector;
-use selector::ParsedNode;
+use selector::ParseNode;
 use std::collections::HashMap;
 
-use crate::selector::ParseNode;
 
 #[cfg(test)]
 mod tests {
@@ -42,14 +41,30 @@ mod tests {
             })
         ]));
     }
+
+    // #[test]
+    // fn benchmark() {
+    //     crate::parse_xml::<
+    //         selector::ParsedNode
+    //     >(include_str!("benchmark.xml"), HashMap::new());
+    // }
+
+    #[test]
+    fn benchmark_closures() {
+        crate::parse_xml(include_str!("benchmark.xml"), HashMap::from([
+            ("depth", |node: &selector::ParsedNode| {
+                println!("Call successful for {}", node);
+            })
+        ]));
+    }
 }
 
 
 /// Parse an xml source can call handler closures when a node that matches a selector is found.
-pub fn parse_xml<Node, F>(xml_src: &str, mut handlers: HashMap<&'static str, F>)
-where 
-  Node: ParseNode + std::fmt::Display, // soon remove display trait bound
-  F: FnMut(&Node) {
+pub fn parse_xml<
+    Node: ParseNode + std::fmt::Display,
+    F: FnMut(&Node)
+>(xml_src: &str, mut handlers: HashMap<&'static str, F>) /* TODO: try &impl FnMut(&Node) */ {
     let mut stack: Vec<Node> = vec![];
     // Node parser is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
     let mut current_node = Node::new();
