@@ -22,9 +22,11 @@ Things that work:
  - [x] Using other quote type in attr value (e.g.: `<tag attr='val"'>`)
  - [x] Space between AttrName and = `<tag attr = "val"/>`
  - [x] Comments
+ - [x] Prolog node (`<?xml version="1.0"?>`) (treated as comment)
 
 Tested Scenarios:
 ```xml
+<?xml version="1.0" encoding="UTF-8"?>
 <tag attr="val"></tag>
 <tag attr="val" attr="val2"></tag>
 <tag attr="val"attr2="val2"></tag>
@@ -42,7 +44,6 @@ Tested Scenarios:
 ```
 
 Things that DON'T work:
- - [ ] Default self-closing nodes (e.g.: `<?xml?>`)
  - [ ] Cdata
  - [ ] namespaces
  - [ ] Text nodes

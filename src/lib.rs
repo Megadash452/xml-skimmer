@@ -78,10 +78,10 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
                     println!("Comment Start");
                     /* Look for the end-of-comment delimeter (-->) */
                     let remaining = match remaining.split_once("-->") {
-                        Some(pair) => {
+                        Some((content, remaining)) => {
                             // print comment content
-                            println!("    {}", pair.0);
-                            pair.1
+                            println!("    {}", content);
+                            remaining
                         }
                         None => {
                             // The rest of xml_src is the comment
@@ -93,6 +93,27 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
                     // skip the comment and its delimeters
                     iter = remaining.chars();
                     println!("Comment Stop");
+                }
+                // Treat prolog nodes <?xml?> as comments
+                else if let Some(remaining) = iter.as_str().strip_prefix("?") {
+                    println!("Prolog start");
+                    // Question-mark (?) is used as a delimiter, look for the ending one
+                    let remaining = match remaining.split_once("?>") {
+                        Some((content, remaining)) => {
+                            // print prolog content
+                            println!("    {}", content);
+                            remaining
+                        }
+                        // Closing delimiter of node not found
+                        None => {
+                            eprintln!("Unclosed comment:\n -> {}\n...will be ignored.", remaining);
+                            break;
+                        }
+                    };
+
+                    // skip the prolog and its delimeter
+                    iter = remaining.chars();
+                    println!("Prolog Stop");
                 }
             }
             // Change OPENING_NODE to CLOSING_NODE
