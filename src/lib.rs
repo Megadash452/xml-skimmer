@@ -2,6 +2,8 @@ mod selector;
 use selector::ParsedNode;
 use std::collections::HashMap;
 
+use crate::selector::ParseNode;
+
 #[cfg(test)]
 mod tests {
     use crate::HashMap;
@@ -44,10 +46,13 @@ mod tests {
 
 
 /// Parse an xml source can call handler closures when a node that matches a selector is found.
-pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'static str, F>) {
-    let mut stack: Vec<ParsedNode> = vec![];
+pub fn parse_xml<Node, F>(xml_src: &str, mut handlers: HashMap<&'static str, F>)
+where 
+  Node: ParseNode + std::fmt::Display, // soon remove display trait bound
+  F: FnMut(&Node) {
+    let mut stack: Vec<Node> = vec![];
     // Node parser is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
-    let mut current_node = ParsedNode::new();
+    let mut current_node = Node::new();
     // Temporary attribute; will be added to the last ParsedNode
     let mut current_attr = Attr::new();
     let mut node_type = NodeType::None;
@@ -120,7 +125,7 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
             '/' => {
                 /* Empty tag at this point means this is a regular closing node.
                    If tag has content it means this is a self-closing node */
-                if current_node.tag == "" {
+                if current_node.tag() == "" {
                     node_type = NodeType::Closing;
                 } else {
                     node_type = NodeType::SelfClosing;
@@ -130,12 +135,7 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
             '>' => {
                 // Push any remaining attribute
                 if current_attr.name != "" {
-                    // If at this point the attr has a non-empty value, it means the string was not closed correctly
-                    if current_attr.value == "" {
-                        current_node.attributes.insert(current_attr.name, current_attr.value);
-                    } else {
-                        panic!("The string of attr `{}` in Node {} was not closed correctly", current_attr.name, current_node)
-                    }
+                    current_node.add_attr(current_attr.name, current_attr.value);
                 }
 
                 // Handlers: when a node has been parsed and some data needs to be read from it
@@ -163,27 +163,27 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
                     }
                     NodeType::SelfClosing => {
                         print!("{}", " ".repeat((indent_level * INDENT_AMOUNT) as usize));
-                        println!("<\x1b[92m{}\x1b[0m \x1b[36m{:?}\x1b[0m\x1b[91m/\x1b[0m>", current_node.tag, current_node.attributes)
+                        println!("<\x1b[92m{}\x1b[0m \x1b[36m{:?}\x1b[0m\x1b[91m/\x1b[0m>", current_node.tag(), current_node.attributes())
                     }
                     // Pop last ParsedNode.
                     NodeType::Closing => {
                         // decrement will panic if there are more OPENING_NODEs than CLOSING_NODEs
                         indent_level -= 1;
                         print!("{}", " ".repeat((indent_level * INDENT_AMOUNT) as usize));
-                        println!("</\x1b[91m{}\x1b[0m>", current_node.tag);
+                        println!("</\x1b[91m{}\x1b[0m>", current_node.tag());
                         
                         // Tag of last ParsedNode must be identical to the current/CLOSING_NODE
-                        if current_node.tag == stack.last().unwrap().tag {
+                        if current_node.tag() == stack.last().unwrap().tag() {
                             stack.pop();
                         } else {
-                            panic!("Rogue Closing_Node <{}>, last ParsedNode is <{}>", current_node.tag, stack.last().unwrap());
+                            panic!("Rogue Closing_Node <{}>, last ParsedNode is <{}>", current_node.tag(), stack.last().unwrap());
                         }
                     }
                     _ => {}
                 }
 
                 // Reset Values
-                current_node = ParsedNode::new();
+                current_node = Node::new();
                 current_attr = Attr::new();
                 writing_to = WriteTo::Content;
                 node_type = NodeType::None;
@@ -213,7 +213,7 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
                                         // Only push attribute if it exists
                                         if !current_attr.name.is_empty() {
                                             // Attr will have an empty value
-                                            current_node.attributes.insert(current_attr.name, String::new());
+                                            current_node.add_attr(current_attr.name, String::new());
                                             current_attr = Attr::new();
                                         }
                                         // add this character to the new attribute, as it will be skipped by the iterator
@@ -247,7 +247,7 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
                         let remaining = match iter.as_str().split_once(character) {
                             Some((attr_val, remaining)) => {
                                 // AttrVal is the slice before the end quote
-                                current_node.attributes.insert(current_attr.name, String::from(attr_val));
+                                current_node.add_attr(current_attr.name, String::from(attr_val));
                                 remaining
                             }
                             None => {
@@ -267,7 +267,7 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
             
             _ => {
                 match writing_to {
-                    WriteTo::Tag => current_node.tag.push(character),
+                    WriteTo::Tag => current_node.tag_mut().push(character),
                     WriteTo::AttrName => current_attr.name.push(character),
                     // WriteTo::AttrVal will never be reached here
                     // WriteTo::Content will never be reached here
@@ -280,7 +280,7 @@ pub fn parse_xml<F: FnMut(&ParsedNode)>(xml_src: &str, mut handlers: HashMap<&'s
     /* There should be no ParsedNodes left in the stack at this point.
        If there is, it means the xml is not written properly */
     if stack.len() > 0 {
-        panic!("One or more Nodes were not closed:\n{:#?}", stack);
+        panic!("One or more Nodes were not closed");
     }
 }
 
