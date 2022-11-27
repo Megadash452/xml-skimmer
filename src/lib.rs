@@ -1,70 +1,12 @@
-mod selector;
-use selector::ParseNode;
+pub mod selector;
+pub use selector::ParseNode;
 use std::collections::HashMap;
 
 
-#[cfg(test)]
-mod tests {
-    use crate::HashMap;
-    use crate::selector;
-
-    #[test]
-    fn css_selectors() {
-        use selector::{ParsedNode, match_to_node};
-        
-        let node = ParsedNode{
-            tag: String::from("tag"),
-            attributes: HashMap::from([
-                (String::from("class"), String::from("class cls c")),
-                (String::from("id"),    String::from("id")),
-                (String::from("attr"),  String::from("val"))
-            ])
-        };
-
-        assert_eq!(match_to_node(&node, "tag"), true);
-        assert_eq!(match_to_node(&node, "tag2, tag"), true);
-        assert_eq!(match_to_node(&node, ".cls"), true);
-        assert_eq!(match_to_node(&node, "#id"), true);
-        assert_eq!(match_to_node(&node, "[attr]"), true);
-        assert_eq!(match_to_node(&node, "[attr=val]"), true);
-        assert_eq!(match_to_node(&node, "tag#id.class.cls.c[attr=val]"), true);        
-    }
-
-    #[test]
-    fn parse_xml() {
-        let mut node_count = 0;
-        
-        crate::parse_xml(include_str!("sample.xml"), HashMap::from([
-            ("tag", |node: &selector::ParsedNode| {
-                println!("Call successful for {}", node);
-                node_count += 1;
-            })
-        ]));
-    }
-
-    // #[test]
-    // fn benchmark() {
-    //     crate::parse_xml::<
-    //         selector::ParsedNode
-    //     >(include_str!("benchmark.xml"), HashMap::new());
-    // }
-
-    #[test]
-    fn benchmark_closures() {
-        crate::parse_xml(include_str!("benchmark.xml"), HashMap::from([
-            ("depth", |node: &selector::ParsedNode| {
-                println!("Call successful for {}", node);
-            })
-        ]));
-    }
-}
-
-
 /// Parse an xml source can call handler closures when a node that matches a selector is found.
-pub fn parse_xml<
-    Node: ParseNode + std::fmt::Display,
-    F: FnMut(&Node)
->(xml_src: &str, mut handlers: HashMap<&'static str, F>) /* TODO: try &impl FnMut(&Node) */ {
+pub fn skim_xml<
+    Node: ParseNode + std::fmt::Display
+>(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&Node)>) {
     let mut stack: Vec<Node> = vec![];
     // Node parser is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
     let mut current_node = Node::new();

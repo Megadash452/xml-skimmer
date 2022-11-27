@@ -1,5 +1,5 @@
 [package]
-name = "xml_parser"
+name = "xml_skimmer"
 version = "0.1.0"
 edition = "2021"
 
