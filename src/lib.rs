@@ -1,17 +1,15 @@
 pub mod selector;
-pub use selector::ParseNode;
+use selector::ParsedNode;
 use std::collections::HashMap;
 
 
 /// Parse an xml source can call handler closures when a node that matches a selector is found.
-pub fn skim_xml<
-    Node: ParseNode + std::fmt::Display
->(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&Node)>) {
-    let mut stack: Vec<Node> = vec![];
-    // Node parser is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
-    let mut current_node = Node::new();
+pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&ParsedNode)>) {
+    let mut stack: Vec<ParsedNode> = vec![];
+    // Node that this fn is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
+    let mut current_node = ParsedNode::default();
     // Temporary attribute; will be added to the last ParsedNode
-    let mut current_attr = Attr::new();
+    let mut current_attr = Attr::default();
     let mut node_type = NodeType::None;
     // Whether the characters being read are appended to the tag, an attribute name, or an attribute value
     let mut writing_to = WriteTo::Content;
@@ -25,6 +23,7 @@ pub fn skim_xml<
         // Anything goes in a TextNode (except `<`)
         if writing_to == WriteTo::Content && character != '<' {
             // TODO: write text content
+            // todo!("write text content");
             continue;
         }
 
@@ -42,12 +41,12 @@ pub fn skim_xml<
                     let remaining = match remaining.split_once("-->") {
                         Some((content, remaining)) => {
                             // print comment content
-                            println!("    {}", content);
+                            println!("    {content}");
                             remaining
                         }
                         None => {
                             // The rest of xml_src is the comment
-                            eprintln!("Unclosed comment:\n -> {}\n...will be ignored.", remaining);
+                            eprintln!("Unclosed comment:\n -> {remaining}\n...will be ignored.");
                             break;
                         }
                     };
@@ -63,12 +62,12 @@ pub fn skim_xml<
                     let remaining = match remaining.split_once("?>") {
                         Some((content, remaining)) => {
                             // print prolog content
-                            println!("    {}", content);
+                            println!("    {content}");
                             remaining
                         }
                         // Closing delimiter of node not found
                         None => {
-                            eprintln!("Unclosed comment:\n -> {}\n...will be ignored.", remaining);
+                            eprintln!("Unclosed comment:\n -> {remaining}\n...will be ignored.");
                             break;
                         }
                     };
@@ -82,7 +81,7 @@ pub fn skim_xml<
             '/' => {
                 /* Empty tag at this point means this is a regular closing node.
                    If tag has content it means this is a self-closing node */
-                if current_node.tag() == "" {
+                if current_node.tag.is_empty() {
                     node_type = NodeType::Closing;
                 } else {
                     node_type = NodeType::SelfClosing;
@@ -91,8 +90,8 @@ pub fn skim_xml<
             // Stop creating the OPENING_NODE or CLOSING_NODE. Then Push or Pop from stack
             '>' => {
                 // Push any remaining attribute
-                if current_attr.name != "" {
-                    current_node.add_attr(current_attr.name, current_attr.value);
+                if !current_attr.name.is_empty() {
+                    current_node.attributes.insert(current_attr.name, current_attr.value);
                 }
 
                 // Handlers: when a node has been parsed and some data needs to be read from it
@@ -113,35 +112,34 @@ pub fn skim_xml<
                     // Push ParsedNode to stack
                     NodeType::Opening => {
                         print!("{}", " ".repeat((indent_level * INDENT_AMOUNT) as usize));
-                        println!("{}", &current_node);
+                        println!("{current_node}");
                         indent_level += 1;
 
                         stack.push(current_node);
                     }
                     NodeType::SelfClosing => {
                         print!("{}", " ".repeat((indent_level * INDENT_AMOUNT) as usize));
-                        println!("<\x1b[92m{}\x1b[0m \x1b[36m{:?}\x1b[0m\x1b[91m/\x1b[0m>", current_node.tag(), current_node.attributes())
+                        println!("<\x1b[92m{}\x1b[0m \x1b[36m{:?}\x1b[0m\x1b[91m/\x1b[0m>", current_node.tag, current_node.attributes)
                     }
                     // Pop last ParsedNode.
                     NodeType::Closing => {
                         // decrement will panic if there are more OPENING_NODEs than CLOSING_NODEs
                         indent_level -= 1;
                         print!("{}", " ".repeat((indent_level * INDENT_AMOUNT) as usize));
-                        println!("</\x1b[91m{}\x1b[0m>", current_node.tag());
+                        println!("</\x1b[91m{}\x1b[0m>", current_node.tag);
                         
                         // Tag of last ParsedNode must be identical to the current/CLOSING_NODE
-                        if current_node.tag() == stack.last().unwrap().tag() {
-                            stack.pop();
-                        } else {
-                            panic!("Rogue Closing_Node <{}>, last ParsedNode is <{}>", current_node.tag(), stack.last().unwrap());
+                        match stack.pop() {
+                            Some(node) if current_node.tag == node.tag => {}
+                            _ => panic!("Rogue Closing_Node <{}>, last ParsedNode is <{}>", current_node.tag, stack.last().unwrap())
                         }
                     }
                     _ => {}
                 }
 
                 // Reset Values
-                current_node = Node::new();
-                current_attr = Attr::new();
+                current_node = ParsedNode::default();
+                current_attr = Attr::default();
                 writing_to = WriteTo::Content;
                 node_type = NodeType::None;
             }
@@ -151,7 +149,7 @@ pub fn skim_xml<
                 if node_type == NodeType::Opening {
                     match writing_to {
                         // Switch from writing to tag -> writing to attr_name
-                        WriteTo::Tag => writing_to = WriteTo::AttrName,
+                        WriteTo::Tag if !current_node.tag.is_empty() => writing_to = WriteTo::AttrName,
                         // Push attr (if name not empty) to current_node (In case of duplicate attr, the last one read will remain)
                         // Case of Boolean Attributes (e.g.: <tag attr1 attr2>)
                         WriteTo::AttrName => {
@@ -170,8 +168,8 @@ pub fn skim_xml<
                                         // Only push attribute if it exists
                                         if !current_attr.name.is_empty() {
                                             // Attr will have an empty value
-                                            current_node.add_attr(current_attr.name, String::new());
-                                            current_attr = Attr::new();
+                                            current_node.attributes.insert(current_attr.name, String::new());
+                                            current_attr = Attr::default();
                                         }
                                         // add this character to the new attribute, as it will be skipped by the iterator
                                         current_attr.name.push(character);
@@ -204,7 +202,7 @@ pub fn skim_xml<
                         let remaining = match iter.as_str().split_once(character) {
                             Some((attr_val, remaining)) => {
                                 // AttrVal is the slice before the end quote
-                                current_node.add_attr(current_attr.name, String::from(attr_val));
+                                current_node.attributes.insert(current_attr.name, String::from(attr_val));
                                 remaining
                             }
                             None => {
@@ -212,19 +210,19 @@ pub fn skim_xml<
                             }
                         };
                         // Finished reading AttrVal, proceed to next Attr
-                        current_attr = Attr::new();
+                        current_attr = Attr::default();
                         writing_to = WriteTo::AttrName;
                         // skip iteration of AttrVal; continue over the rest of the xml_src
                         iter = remaining.chars();
                     }
                     // WriteTo::Content will never be reached here
-                    _ => panic!("Quotes (single or double) not suppoed to be here!")
+                    _ => panic!("Quotes (single or double) not supposed to be here!")
                 }
             }
             
             _ => {
                 match writing_to {
-                    WriteTo::Tag => current_node.tag_mut().push(character),
+                    WriteTo::Tag => current_node.tag.push(character),
                     WriteTo::AttrName => current_attr.name.push(character),
                     // WriteTo::AttrVal will never be reached here
                     // WriteTo::Content will never be reached here
@@ -269,13 +267,9 @@ enum WriteTo {
 //     content: String
 // }
 
-// A pair of strings
+/// A pair of strings
+#[derive(Default)]
 struct Attr {
-    name: String,
-    value: String
-}
-impl Attr {
-    fn new() -> Self {
-        Self{ name: String::new(), value: String::new() }
-    }
+    pub name: String,
+    pub value: String
 }

@@ -3,9 +3,7 @@ use xml_skimmer::selector;
 
 #[test]
 fn benchmark() {
-    // xml_skimmer::skim_xml::<
-    //     selector::ParsedNode
-    // >(include_str!("benchmark.xml"), HashMap::new());
+    // xml_skimmer::skim_xml(include_str!("benchmark.xml"), HashMap::new());
 }
 
 #[test]

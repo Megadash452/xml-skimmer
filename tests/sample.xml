@@ -7,6 +7,7 @@
 </tag>
 <!--Comment-->
 <tag/>
+< tag />
 <tag attr/>
 <tag attr="val"/>
 <tag attr='val'/>

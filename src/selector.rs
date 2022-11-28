@@ -78,7 +78,7 @@ fn split_tag(selector: &str) -> (&str, &str) {
 ///   - e.g.: `tag.cls, tag2.cls2`
 /// <hr><br>
 /// Not allowed: empty selector, and Combinators (e.g.: `tag tag2` or `tag > tag2`)
-pub fn match_to_node(node: &impl ParseNode, selector: &str) -> bool {
+pub fn match_to_node(node: &ParsedNode, selector: &str) -> bool {
     if selector.is_empty() {
         eprintln!("Empty selectors are not valid");
         return false
@@ -95,7 +95,7 @@ pub fn match_to_node(node: &impl ParseNode, selector: &str) -> bool {
 
         // Match tag to node
         // When selector doesn't have tag (i.e. tag is empty) it is considered as matching because the node tag is being ignored
-        if tag.is_empty() || tag == node.tag() {
+        if tag.is_empty() || tag == node.tag {
             tag_match = true;
         }
         
@@ -135,7 +135,7 @@ pub fn match_to_node(node: &impl ParseNode, selector: &str) -> bool {
 
 /// Check if part of a css selector matches an attribute in node
 /// - E.g: Check if `obj = ".cls"` matches in `Node{ _, attrs: {"class": "... cls ..."} }`
-fn match_sel_obj_to_node(node: &impl ParseNode, obj: &str, classlist: &Vec<&str>) -> bool{
+fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) -> bool{
     // When obj is empty it is considered as matching because the selector ignores the node attributes
     if obj.is_empty() {
         return true
@@ -152,7 +152,7 @@ fn match_sel_obj_to_node(node: &impl ParseNode, obj: &str, classlist: &Vec<&str>
         // Match selector id with node id
         Some('#') => {
             // Check if node has attribute named "id"
-            match node.attributes().get("id") {
+            match node.attributes.get("id") {
                 Some(id) => {
                     // Check that id attr has specific value
                     if id != &obj[1..] {
@@ -174,7 +174,7 @@ fn match_sel_obj_to_node(node: &impl ParseNode, obj: &str, classlist: &Vec<&str>
                             attr_name = attr_name.trim_matches(' ');
 
                             // Check if attr exists at all (with any value) in node
-                            match node.attributes().get(attr_name) {
+                            match node.attributes.get(attr_name) {
                                 // Check if attr exists with specific value in node
                                 Some(val) => {
                                     // Trim trailing whitespace from attr_val
@@ -193,7 +193,7 @@ fn match_sel_obj_to_node(node: &impl ParseNode, obj: &str, classlist: &Vec<&str>
                             }
                         }
                         // Check if attr exists at all (with any value) in node
-                        None => if node.attributes().get(attr) == None {
+                        None => if node.attributes.get(attr) == None {
                             return false
                         }
                     }
@@ -209,60 +209,23 @@ fn match_sel_obj_to_node(node: &impl ParseNode, obj: &str, classlist: &Vec<&str>
 }
 
 
-// A node that can be parsed by the parser. Must have tag and attributes
-pub trait ParseNode {
-    fn new() -> Self;
 
-    fn tag(&self) -> &str;
-    fn tag_mut(&mut self) -> &mut String;
-    fn set_tag(&mut self, val: String);
-    fn attributes(&self) -> &HashMap<String, String>;
-    fn add_attr(&mut self, name: String, val: String);
-
-    fn class_list(&self) -> Vec<&str> {
-        match self.attributes().get("class") {
+#[derive(Debug, Default)]
+pub struct ParsedNode {
+    pub tag: String,
+    pub attributes: HashMap<String, String>
+}
+impl ParsedNode {
+    pub fn class_list(&self) -> Vec<&str> {
+        match self.attributes.get("class") {
             // Classes are separated by space
             Some(list) => list.split(' ').collect(),
             None => Vec::new()
         }
     }
 }
-
-// impl<Node> Display for Node
-// where Node: ParseNode {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "<\x1b[92m{}\x1b[0m \x1b[36m{:?}\x1b[0m>", self.tag(), self.attributes())
-//     }
-// }
-
-#[derive(Debug)]
-pub struct ParsedNode {
-    pub tag: String,
-    pub attributes: HashMap<String, String>
-}
-impl ParseNode for ParsedNode {
-    fn new() -> Self {
-        Self{ tag: String::new(), attributes: HashMap::new() }
-    }
-
-    fn tag(&self) -> &str {
-        self.tag.as_str()
-    }
-    fn tag_mut(&mut self) -> &mut String {
-        &mut self.tag
-    }
-    fn set_tag(&mut self, val: String) {
-        self.tag = val;
-    }
-    fn attributes(&self) -> &HashMap<String, String> {
-        &self.attributes
-    }
-    fn add_attr(&mut self, name: String, val: String) {
-        self.attributes.insert(name, val);
-    }
-}
 impl Display for ParsedNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<\x1b[92m{}\x1b[0m \x1b[36m{:?}\x1b[0m>", self.tag(), self.attributes())
+        write!(f, "<\x1b[92m{tag}\x1b[0m \x1b[36m{attrs:?}\x1b[0m>", tag=self.tag, attrs=self.attributes)
     }
 }
