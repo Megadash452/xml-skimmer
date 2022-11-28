@@ -1,10 +1,9 @@
 pub mod selector;
-use selector::ParsedNode;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 
 /// Parse an xml source can call handler closures when a node that matches a selector is found.
-pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&ParsedNode)>) {
+pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&ParsedNode)>) -> Result<(), SkimError> {
     let mut stack: Vec<ParsedNode> = vec![];
     // Node that this fn is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
     let mut current_node = ParsedNode::default();
@@ -44,11 +43,8 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
                             println!("    {content}");
                             remaining
                         }
-                        None => {
-                            // The rest of xml_src is the comment
-                            eprintln!("Unclosed comment:\n -> {remaining}\n...will be ignored.");
-                            break;
-                        }
+                        // The rest of xml_src is the comment
+                        None => return Err(SkimError::UnclosedComment(remaining.to_string()))
                     };
 
                     // skip the comment and its delimeters
@@ -65,11 +61,8 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
                             println!("    {content}");
                             remaining
                         }
-                        // Closing delimiter of node not found
-                        None => {
-                            eprintln!("Unclosed comment:\n -> {remaining}\n...will be ignored.");
-                            break;
-                        }
+                        // The rest of xml_src is the comment
+                        None => return Err(SkimError::UnclosedComment(remaining.to_string()))
                     };
 
                     // skip the prolog and its delimeter
@@ -131,10 +124,12 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
                         // Tag of last ParsedNode must be identical to the current/CLOSING_NODE
                         match stack.pop() {
                             Some(node) if current_node.tag == node.tag => {}
-                            _ => panic!("Rogue Closing_Node <{}>, last ParsedNode is <{}>", current_node.tag, stack.last().unwrap())
+                            Some(node) => return Err(SkimError::CantCloseNode(current_node.tag, Some(node))),
+                            None => return Err(SkimError::CantCloseNode(current_node.tag, None))
                         }
-                    }
-                    _ => {}
+                    },
+                    // NodeType::None will not be reached here
+                    NodeType::None => panic!("Found '>' with NodeType::None")
                 }
 
                 // Reset Values
@@ -189,7 +184,7 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
                 if node_type == NodeType::Opening && writing_to == WriteTo::AttrName {
                     writing_to = WriteTo::AttrVal;
                 } else {
-                    panic!("Equal_Sign (=) not supposed to be here!");
+                    return Err(SkimError::BadEqSign)
                 }
             }
             // Switch from writing to attr.val -> writing to attr.name
@@ -205,9 +200,7 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
                                 current_node.attributes.insert(current_attr.name, String::from(attr_val));
                                 remaining
                             }
-                            None => {
-                                panic!("Value of attribute {} in node {} has no end quote (perhaps wrong quote was used to close). Cannot close node.", current_attr.name, current_node);
-                            }
+                            None => return Err(SkimError::UnclosedString(current_attr.name, current_node))
                         };
                         // Finished reading AttrVal, proceed to next Attr
                         current_attr = Attr::default();
@@ -216,7 +209,7 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
                         iter = remaining.chars();
                     }
                     // WriteTo::Content will never be reached here
-                    _ => panic!("Quotes (single or double) not supposed to be here!")
+                    _ => return Err(SkimError::BadQuote)
                 }
             }
             
@@ -226,7 +219,7 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
                     WriteTo::AttrName => current_attr.name.push(character),
                     // WriteTo::AttrVal will never be reached here
                     // WriteTo::Content will never be reached here
-                    _ => panic!("This should have not been reached")
+                    _ => panic!("{writing_to:?} should have not been reached")
                 }
             }    
         }
@@ -235,7 +228,9 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
     /* There should be no ParsedNodes left in the stack at this point.
        If there is, it means the xml is not written properly */
     if stack.len() > 0 {
-        panic!("One or more Nodes were not closed");
+        Err(SkimError::UnclosedNode)
+    } else {
+        Ok(())
     }
 }
 
@@ -258,8 +253,8 @@ enum NodeType {
     None
 }
 
-#[derive(PartialEq, Eq)]
-enum WriteTo {
+#[derive(Debug, PartialEq, Eq)]
+pub enum WriteTo {
     Tag, AttrName, AttrVal, Content
 }
 
@@ -269,7 +264,54 @@ enum WriteTo {
 
 /// A pair of strings
 #[derive(Default)]
-struct Attr {
+pub struct Attr {
     pub name: String,
     pub value: String
+}
+
+
+#[derive(Debug, Default)]
+pub struct ParsedNode {
+    pub tag: String,
+    pub attributes: HashMap<String, String>
+}
+impl ParsedNode {
+    pub fn class_list(&self) -> Vec<&str> {
+        match self.attributes.get("class") {
+            // Classes are separated by space
+            Some(list) => list.split(' ').collect(),
+            None => Vec::new()
+        }
+    }
+}
+impl Display for ParsedNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<\x1b[92m{tag}\x1b[0m \x1b[36m{attrs:?}\x1b[0m>", tag=self.tag, attrs=self.attributes)
+    }
+}
+
+
+#[derive(Debug)]
+pub enum SkimError {
+    BadQuote,
+    UnclosedNode,
+    UnclosedComment(String),
+    /// Contains [`Attr`]::name and [`ParsedNode`] that contains the [`Attr`].
+    UnclosedString(String, ParsedNode),
+    /// Conitans the attempted closing tag `</tag>` and the last [`ParsedNode`] in the stack.
+    CantCloseNode(String, Option<ParsedNode>),
+    BadEqSign,
+}
+impl Display for SkimError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadQuote => write!(f, "Quotes (single or double) not supposed to be here!"),
+            Self::UnclosedNode => write!(f, "One or more Nodes were not closed"),
+            Self::UnclosedComment(content) => write!(f, "Unclosed comment: -> {content}"),
+            Self::UnclosedString(attr_name, node) => write!(f, "Missing closing quote (single or double) of attribute {attr_name} in node {node} (perhaps wrong quote was used to close)"),
+            Self::CantCloseNode(closing_tag, Some(last_node)) => write!(f, "Rogue Closing_Node <{closing_tag}>, last ParsedNode is <{last_node}>"),
+            Self::CantCloseNode(closing_tag, None) => write!(f, "Rogue Closing_Node <{closing_tag}>"),
+            Self::BadEqSign => write!(f, "Equal_Sign (=) not supposed to be here!"),
+        }
+    }
 }

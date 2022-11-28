@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use xml_skimmer::selector::{ParsedNode, match_to_node};
+use xml_skimmer::{ParsedNode, selector::match_to_node};
 
 #[test]
 fn css_selectors() {
