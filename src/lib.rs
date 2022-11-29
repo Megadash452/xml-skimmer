@@ -1,9 +1,14 @@
 pub mod selector;
 use std::{collections::HashMap, fmt::Display};
+use crate::selector::Selector;
+
+// * for debug only, remove after
+const INDENT_AMOUNT: usize = 4;
 
 
 /// Parse an xml source can call handler closures when a node that matches a selector is found.
-pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&ParsedNode)>) -> Result<(), SkimError> {
+pub fn skim_xml<F>(xml_src: &str, handlers: HashMap<&'static str, F>) -> Result<(), SkimError>
+where F: FnMut(&ParsedNode) {
     let mut stack: Vec<ParsedNode> = vec![];
     // Node that this fn is working with. Will be pushed to stack if is an OPENING_NODE, and popped if is a CLOSING_NODE
     let mut current_node = ParsedNode::default();
@@ -13,9 +18,11 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
     // Whether the characters being read are appended to the tag, an attribute name, or an attribute value
     let mut writing_to = WriteTo::Content;
 
-    // * for debug only, remove after
-    let mut indent_level: u32 = 0;
-    const INDENT_AMOUNT: u32 = 4;
+    // parse selector strings
+    let mut handlers = handlers.into_iter().map(|(sel, fun)| {
+        (sel.parse::<Selector>().unwrap(), fun)
+    }).collect::<Vec<(Selector, F)>>();
+
 
     let mut iter = xml_src.chars();
     while let Some(character) = iter.next() {
@@ -89,14 +96,13 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
 
                 // Handlers: when a node has been parsed and some data needs to be read from it
                 match node_type {
-                    NodeType::Opening | NodeType::SelfClosing => {
+                    NodeType::Opening | NodeType::SelfClosing =>
+                        // Check if any selector (keys in the HashMap) matches current_node
                         for (sel, handler) in handlers.iter_mut() {
-                            // Check if any selector (keys in the HashMap) matches current_node
-                            if selector::match_to_node(&current_node, *sel) || *sel == "*" {
+                            if sel.match_node(&current_node) {
                                 handler(&current_node);
                             }
-                        }
-                    }
+                        },
                     _ => {}
                 }
 
@@ -104,29 +110,24 @@ pub fn skim_xml(xml_src: &str, mut handlers: HashMap<&'static str, impl FnMut(&P
                 match node_type {
                     // Push ParsedNode to stack
                     NodeType::Opening => {
-                        print!("{}", " ".repeat((indent_level * INDENT_AMOUNT) as usize));
+                        print!("{}", " ".repeat((stack.len() * INDENT_AMOUNT) as usize));
                         println!("{current_node}");
-                        indent_level += 1;
-
                         stack.push(current_node);
                     }
                     NodeType::SelfClosing => {
-                        print!("{}", " ".repeat((indent_level * INDENT_AMOUNT) as usize));
+                        print!("{}", " ".repeat((stack.len() * INDENT_AMOUNT) as usize));
                         println!("<\x1b[92m{}\x1b[0m \x1b[36m{:?}\x1b[0m\x1b[91m/\x1b[0m>", current_node.tag, current_node.attributes)
                     }
                     // Pop last ParsedNode.
                     NodeType::Closing => {
-                        // decrement will panic if there are more OPENING_NODEs than CLOSING_NODEs
-                        indent_level -= 1;
-                        print!("{}", " ".repeat((indent_level * INDENT_AMOUNT) as usize));
-                        println!("</\x1b[91m{}\x1b[0m>", current_node.tag);
-                        
                         // Tag of last ParsedNode must be identical to the current/CLOSING_NODE
                         match stack.pop() {
                             Some(node) if current_node.tag == node.tag => {}
                             Some(node) => return Err(SkimError::CantCloseNode(current_node.tag, Some(node))),
                             None => return Err(SkimError::CantCloseNode(current_node.tag, None))
                         }
+                        print!("{}", " ".repeat((stack.len() * INDENT_AMOUNT) as usize));
+                        println!("</\x1b[91m{}\x1b[0m>", current_node.tag);
                     },
                     // NodeType::None will not be reached here
                     NodeType::None => panic!("Found '>' with NodeType::None")
@@ -254,7 +255,7 @@ enum NodeType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum WriteTo {
+enum WriteTo {
     Tag, AttrName, AttrVal, Content
 }
 

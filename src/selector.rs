@@ -1,231 +1,328 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{str::FromStr, collections::{HashMap, HashSet}};
+use crate::ParsedNode;
 
-/// Takes a css selector and splits it into subselectors which are comma-separated
-fn separate_commas(selector: &str) -> Vec<&str> {
-    // Stores the subselectors which will be returned
-    let mut rtrn: Vec<&str> = vec![];
 
-    // Commas inside strings (delimited by " or ') will be ignored
-    let mut in_str = false;
+/// Parses a string where a type that can be parsed is separated by commas.
+/// Also accepts 1 end trailing comma.
+/// 
+/// ## Example
+/// 
+/// ```
+/// use xml_skimmer::selector::{comma_separated, Selector};
+/// 
+/// assert_eq!(comma_separated::<Selector>("tag , tag2 , "), Ok(vec![
+///     Selector { tag: "tag".to_string().into(), .. Default::default() },
+///     Selector { tag: "tag2".to_string().into(), .. Default::default() },
+/// ]));
+/// ```
+pub fn comma_separated<T: FromStr>(s: &str) -> Result<Vec<T>, T::Err> {
+    let mut rtrn = vec![];
+    let mut splits = s.split(',');
 
-    // start and end indices of the subselector &str
-    let mut start = 0;
-    let mut end = 0;
-
-    for character in selector.chars() {
-        match character {
-            // Toggle in_str state
-            '"' | '\'' => in_str = !in_str,
-            ',' => {
-                // Commas in strings are ignored
-                if !in_str {
-                    // Trim trailing whitespace before pushing
-                    rtrn.push(selector[start..end].trim_matches(' '));
-                    start = end + 1;
-                }
-            }
-            _ => {}
+    while let Some(mut s) = splits.next() {
+        s = s.trim();
+        // is not a trailing comma
+        if splits.clone().next() != None || !s.is_empty() {
+            rtrn.push(T::from_str(s.trim())?);
         }
-
-        end += 1;
     }
 
-    // Push the last subselector if it exists
-    let sub = selector[start..end].trim_matches(' ');
-    if !sub.is_empty() {
-        rtrn.push(sub);
-    }
-
-    rtrn
+    Ok(rtrn)
 }
 
-/// Get the slice that represents the tag in a css selector, and also the slice after
+
+/// A CSS selector that can be matched against an XML node.
+/// 
+/// Supported tokens are: `tag`, `#id`, `.class`, `[attr]`,
+/// `[attr=val]`, `[attr="val"]` (single or double quotes).
+/// 
+/// When an **attribute** in the selector has no value (`[attr]`),
+/// it means that when matching whith an XML node
+/// it will only check if the attribute exists at all with any value.
+/// But when an **attribute** in the selector has an empty value (`[attr=""]`),
+/// it will check if it has that attribute,
+/// and also requires that the XML node specifically has an empty string as the value for that attribute.
+/// 
+/// # [`FromStr`]
+/// 
+/// Can be parsed from a String (`"".parse::<Selector>()` or `Selector::from_str("")`).
+/// Whitespace is not allowed in parsing (except inside attribute brackets `[]`)
+/// because it is used for node hierarchy, which this struct does not support // TODO: (yet, also '*' and '>' selector operators).
+/// 
+/// The tag always goes first in the string.
+/// 
+/// `classes` is a [`HashSet`] and `attributes` is a [`HashMap`],
+/// so a class or attribute name must not be found in the string more than once.
+/// Attributes can have no value `[attr]`, or Some value `[attr=val]`,
+/// where the value can be wrapped in single `'` or double `"` quotes.
+/// 
+/// There must only be 1 **id** in the string.
+/// 
+/// See [`SelectorParseError`] for possible errors when parsing from a string.
+#[derive(Debug, Default, PartialEq)]
+pub struct Selector {
+    pub tag: Option<String>,
+    pub id: Option<String>,
+    pub classes: HashSet<String>,
+    pub attributes: HashMap<String, Option<String>>
+}
+impl Selector {
+    pub fn match_node(&self, node: &ParsedNode) -> bool {
+        todo!()
+    }
+}
+impl FromStr for Selector {
+    type Err = SelectorParseError;
+
+    fn from_str(mut s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(Self::Err::EmptyString)
+        }
+
+        let tag = {
+            let (tag, rest) = split_tag(s)?;
+            s = rest;
+
+            if tag.is_empty() {
+                None
+            } else {
+                Some(tag.to_string())
+            }
+        };
+
+        let mut id: Option<String> = None;
+        let mut classes = HashSet::new();
+        let mut attributes = HashMap::new();
+
+        let mut buf = String::new();
+        let mut chars = s.chars();
+
+        /// Whether the characters being parsed are for ID, a Class, or an Attribute
+        #[derive(PartialEq)]
+        enum PushTo {
+            Id, Classes, AttrName
+        }
+        impl PushTo {
+            pub fn new(c: char) -> Result<Self, SelectorParseError> {
+                match c {
+                    '#' => Ok(Self::Id),
+                    '.' => Ok(Self::Classes),
+                    '[' => Ok(Self::AttrName),
+                    _ => Err(SelectorParseError::UnknownPrefix)
+                }
+            }
+        }
+
+        let mut push_to = PushTo::new(match chars.next() {
+            Some(c) => c,
+            None => return Ok(Self { tag, id, classes, attributes })
+        })?;
+
+        // Find class, id, other attributes
+        while let Some(character) = chars.next() {
+            match character {
+                '#' | '.' | '[' => {
+                    match push_to {
+                        PushTo::Id => if id.is_some() {
+                            return Err(Self::Err::MultipleIDs)
+                        } else {
+                            id = Some(buf)
+                        },
+                        PushTo::Classes => if !classes.insert(buf) {
+                                // If the set already contained this class
+                                return Err(Self::Err::DuplicateClass)
+                            },
+                        // When one of these chars is in the attribute: [at#tr] or [at.tr] or [at[tr] 
+                        PushTo::AttrName => return Err(Self::Err::UnclosedBracket)
+                    }
+
+                    // reset buffers
+                    buf = String::new();
+                    push_to = PushTo::new(character)?;
+                },
+                '=' => match push_to {
+                    PushTo::AttrName => {
+                        if buf.is_empty() {
+                            return Err(Self::Err::EmptyAttrName)
+                        }
+                        // skip whitespace before attribute
+                        let mut next = None;
+                        while let Some(character) = chars.next() {
+                            if !character.is_whitespace() {
+                                next = Some(character);
+                                break
+                            }
+                        }
+
+                        let mut val_buf = String::new();
+                        let opening_quote = match next {
+                            Some('"') => Some('"'),
+                            Some('\'') => Some('\''),
+                            // When there is nothing after EqSign '=': [attr=]
+                            Some(']') => return Err(Self::Err::BadChar),
+
+                            Some(character) => {
+                                val_buf.push(character);
+                                None
+                            },
+                            None => None
+                        };
+
+                        let mut found_closing_quote = false;
+                        let mut found_closing_bracket = false;
+                        // Find closing quote (if there was an opening quote)
+                        if let Some(quote) = opening_quote {
+                            while let Some(character) = chars.next() {
+                                if character == quote {
+                                    found_closing_quote = true;
+                                    break
+                                }
+                                val_buf.push(character)
+                            }
+                            // also find ']'
+                            while let Some(character) = chars.next() {
+                                if character == ']' {
+                                    found_closing_bracket = true;
+                                    break
+                                }
+                                if !character.is_whitespace() {
+                                    return Err(Self::Err::BadChar)
+                                }
+                            }
+                        } else {
+                            // The value is every character until ']' or whitespace
+                            while let Some(character) = chars.next() {
+                                if character.is_whitespace() {
+                                    break
+                                }
+                                if character == ']' {
+                                    found_closing_bracket = true;
+                                    break
+                                }
+                                val_buf.push(character)
+                            }
+                            // also find ']'
+                            if !found_closing_bracket {
+                                while let Some(character) = chars.next() {
+                                    if character == ']' {
+                                        found_closing_bracket = true;
+                                        break
+                                    }
+                                    if !character.is_whitespace() {
+                                        return Err(Self::Err::BadChar)
+                                    }
+                                }
+                            }
+                        }
+
+                        if opening_quote.is_some() && !found_closing_quote {
+                            return Err(Self::Err::UnclosedString)
+                        }
+                        if !found_closing_bracket {
+                            return Err(Self::Err::UnclosedBracket)
+                        }
+
+                        if let Some(_) = attributes.insert(buf, Some(val_buf)) {
+                            // If this attribute already existed
+                            return Err(Self::Err::DuplicateAttr)
+                        }
+
+                        // reset buffers
+                        buf = String::new();
+                        match chars.next() {
+                            Some(c) => push_to = PushTo::new(c)?,
+                            None => break
+                        }
+                    },
+                    _ => return Err(Self::Err::BadChar)
+                },
+                ']' => match push_to {
+                    PushTo::AttrName => {
+                        if buf.is_empty() {
+                            return Err(Self::Err::EmptyAttrName)
+                        }
+                        if let Some(_) = attributes.insert(buf, None) {
+                            // If this attribute already existed
+                            return Err(Self::Err::DuplicateAttr)
+                        }
+
+                        // reset buffers
+                        buf = String::new();
+                        match chars.next() {
+                            Some(c) => push_to = PushTo::new(c)?,
+                            None => break
+                        }
+                    },
+                    _ => return Err(Self::Err::BadChar)
+                },
+                // whitespace is only allowed in attributes (and is ignored)
+                _ if character.is_whitespace() =>
+                    if push_to != PushTo::AttrName {
+                        return Err(Self::Err::WhiteSpace)
+                    },
+                _ => buf.push(character)
+            }
+        }
+
+        // When reached the end of the string, push what is in the buffer
+        if !buf.is_empty() {
+            match push_to {
+                PushTo::Id => if id.is_some() {
+                    return Err(Self::Err::MultipleIDs)
+                } else {
+                    id = Some(buf)
+                },
+                PushTo::Classes => if !classes.insert(buf) {
+                    // If the set already contained this class
+                    return Err(Self::Err::DuplicateClass)
+                },
+                // When one of these chars is in the attribute: [at#tr] or [at.tr] or [at[tr] 
+                PushTo::AttrName => return Err(Self::Err::UnclosedBracket)
+            }
+        }
+
+        Ok(Self { tag, id, classes, attributes })
+    }
+}
+
+
+/// Get the slice that represents the tag in a css selector, and also the slice after.
 /// - e.g.: `tag#id.cls[attr=val]` -> (`tag`, `#id.cls[attr=val]`)
-fn split_tag(selector: &str) -> (&str, &str) {
+/// 
+/// The **tag** ends before a [`punctuation`] character. Whitespace is not allowed.
+fn split_tag(selector: &str) -> Result<(&str, &str), SelectorParseError> {
     // The end index of the tag slice
     let mut end = 0;
 
     for character in selector.chars() {
-        match character {
-            ' ' | '\t' | '\n' => {
-                eprintln!("No whitespace allowed in selectors");
-                return ("", "")
-            }
-            // Split tag at the selector objects (cls, id, attr respectively)
-            '.' | '#' | '[' => {
-                return (&selector[..end], &selector[end..])
-            }
-            _ => { }
+        if character.is_ascii_punctuation() {
+            return Ok((&selector[..end], &selector[end..]))
         }
-
-        end += 1;
+        if character.is_whitespace() {
+            return Err(SelectorParseError::WhiteSpace)
+        }
+        end += 1
     }
 
     // The entire selector is the tag
-    return (selector, "")
+    return Ok((selector, ""))
 }
 
 
-/// Match a css selector to a node. Only supports `tag`, `#id`, `.class`, `[attr]`, `[attr="val"]`
-/// - The `tag` should be the first part of the selector, and is optional.
-/// - Then anything preceeded with `#` is an id. Looks for attribute `id` in node.
-/// - Then anything preceeded with `.` is a class. Looks for attribute `class` in node.
-/// - Then anything wrapped in `[]` is any other attribute.
-///   - `[attr]` checks if an attribute exists at all in node.
-///   - `[attr="val"]` or checks that an attribute has the specified value in node.
-///     - Aliases: `[attr='val']`, `[attr=val]`
-/// - Group multiple selectors into one by separating them with commas (,). If any of the selectors match the node, this fn will return true
-///   - e.g.: `tag.cls, tag2.cls2`
-/// <hr><br>
-/// Not allowed: empty selector, and Combinators (e.g.: `tag tag2` or `tag > tag2`)
-pub fn match_to_node(node: &ParsedNode, selector: &str) -> bool {
-    if selector.is_empty() {
-        eprintln!("Empty selectors are not valid");
-        return false
-    }
-
-    // Match each subselector to node
-    'selectors: for selector in separate_commas(selector) {
-        // The tag of the selector, and rest of the selector
-        let (tag, rest) = split_tag(selector);
-        // Iterate over the characters after the tag of the selector
-        let mut iter = rest.chars();
-        // Tells if this tag matches the node's tag
-        let mut tag_match = false;
-
-        // Match tag to node
-        // When selector doesn't have tag (i.e. tag is empty) it is considered as matching because the node tag is being ignored
-        if tag.is_empty() || tag == node.tag {
-            tag_match = true;
-        }
-        
-        // The start and end of a selector object (class, id, attr)
-        let mut start: usize = 0;
-        let mut end: usize = 1;
-        // Get the class attribute
-        let classlist = node.class_list();
-
-        // The first character woulc be a ., #, or [, but it should be skipped because we want to look for the next one
-        iter.next();
-        // Find class, id, other attributes
-        for character in &mut iter {
-            match character {
-                '.' | '#' | '[' => {
-                    // If any attribute does not match (i.e. this fn returns false), then this subselector does not match
-                    if !match_sel_obj_to_node(node, &rest[start..end], &classlist) {
-                        // Move on to the next selector
-                        continue 'selectors;
-                    }
-                    start = end;
-                }
-                _ => { }
-            }
-            end += 1;
-        }
-
-        // When reached the end of selector, do one more for the last obj
-        if tag_match && match_sel_obj_to_node(node, &rest[start..], &classlist) {
-            return true
-        }
-    }
-
-    false
-}
-
-
-/// Check if part of a css selector matches an attribute in node
-/// - E.g: Check if `obj = ".cls"` matches in `Node{ _, attrs: {"class": "... cls ..."} }`
-fn match_sel_obj_to_node(node: &ParsedNode, obj: &str, classlist: &Vec<&str>) -> bool{
-    // When obj is empty it is considered as matching because the selector ignores the node attributes
-    if obj.is_empty() {
-        return true
-    }
-
-    // First char of obj tells if it is class, id, or attr
-    match obj.chars().nth(0) {
-        // Match selector classs with one of node classes
-        Some('.') => {
-            if !classlist.contains(&&obj[1..]) {
-                return false
-            }
-        }
-        // Match selector id with node id
-        Some('#') => {
-            // Check if node has attribute named "id"
-            match node.attributes.get("id") {
-                Some(id) => {
-                    // Check that id attr has specific value
-                    if id != &obj[1..] {
-                        return false
-                    }
-                }
-                None => return false
-            }
-        }
-        // Match selector attr with node attr
-        Some('[') =>
-            // Close this attr part of selector
-            match obj[1..].split_once(']') {
-                Some((attr, _)) =>
-                    // Separate attr_name and attr_val
-                    match attr.split_once('=') {
-                        Some((mut attr_name, mut attr_val)) => {
-                            // Trim trailing whitespace from attr_name
-                            attr_name = attr_name.trim_matches(' ');
-
-                            // Check if attr exists at all (with any value) in node
-                            match node.attributes.get(attr_name) {
-                                // Check if attr exists with specific value in node
-                                Some(val) => {
-                                    // Trim trailing whitespace from attr_val
-                                    attr_val = attr_val.trim_matches(' ');
-
-                                    // Strip out quotes (", ') if attr_val is delimited by any
-                                    if let Some(val) = attr_val.split(['"', '\''].as_ref()).nth(1) {
-                                        attr_val = val;
-                                    }
-
-                                    if attr_val != val {
-                                        return false
-                                    }
-                                }
-                                None => return false
-                            }
-                        }
-                        // Check if attr exists at all (with any value) in node
-                        None => if node.attributes.get(attr) == None {
-                            return false
-                        }
-                    }
-                None => {
-                    eprintln!("Did not find closing square-bracket (]) for selector {}... aborting.", obj);
-                    return false
-                }
-            }
-        _ => panic!("Only valid characters are: . # [ ... This isn't supposed to happen")
-    }
-
-    true
-}
-
-
-
-#[derive(Debug, Default)]
-pub struct ParsedNode {
-    pub tag: String,
-    pub attributes: HashMap<String, String>
-}
-impl ParsedNode {
-    pub fn class_list(&self) -> Vec<&str> {
-        match self.attributes.get("class") {
-            // Classes are separated by space
-            Some(list) => list.split(' ').collect(),
-            None => Vec::new()
-        }
-    }
-}
-impl Display for ParsedNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<\x1b[92m{tag}\x1b[0m \x1b[36m{attrs:?}\x1b[0m>", tag=self.tag, attrs=self.attributes)
-    }
+#[derive(Debug, PartialEq)]
+pub enum SelectorParseError {
+    MultipleIDs,
+    DuplicateClass,
+    DuplicateAttr,
+    EmptyAttrName,
+    /// When there is a punctuation that is not
+    /// `#`, `.`, or `[` in the selector string.
+    UnknownPrefix,
+    UnclosedString,
+    UnclosedBracket,
+    /// A [`char`] was found in a position
+    /// that it wasn't supposed to be in.
+    BadChar,
+    WhiteSpace,
+    EmptyString,
 }
