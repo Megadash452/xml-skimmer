@@ -68,7 +68,50 @@ pub struct Selector {
 }
 impl Selector {
     pub fn match_node(&self, node: &ParsedNode) -> bool {
-        todo!()
+        if let Some(ref tag) = self.tag {
+            if node.tag != *tag {
+                return false
+            }
+        }
+
+        if let Some(ref id) = self.id {
+            match node.attributes.get("id") {
+                Some(node_id) =>
+                    if *node_id != *id {
+                        return false
+                    },
+                None => return false
+            }
+        }
+            
+        let class_list = node.class_list();
+
+        for class in self.classes.iter() {
+            if !class_list.contains(class.as_str()) {
+                return false
+            }
+        }
+
+        for attr in self.attributes.iter() {
+            match attr.1 {
+                // [attr = val]
+                Some(attr_val) => match node.attributes.get(attr.0) {
+                    Some(node_attr_val) =>
+                        if *node_attr_val != *attr_val {
+                            return false
+                        },
+                    // Node does not have attribute
+                    None => return false
+                },
+                // [attr]
+                None =>
+                    if !node.attributes.contains_key(attr.0) {
+                        return false
+                    }
+            }
+        }
+
+        true
     }
 }
 impl FromStr for Selector {
@@ -312,8 +355,8 @@ fn split_tag(selector: &str) -> Result<(&str, &str), SelectorParseError> {
 #[derive(Debug, PartialEq)]
 pub enum SelectorParseError {
     MultipleIDs,
-    DuplicateClass,
-    DuplicateAttr,
+    DuplicateClass, // ? might remove
+    DuplicateAttr, // ? might remove
     EmptyAttrName,
     /// When there is a punctuation that is not
     /// `#`, `.`, or `[` in the selector string.

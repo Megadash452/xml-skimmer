@@ -1,5 +1,5 @@
 pub mod selector;
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::{HashMap, HashSet}, fmt::Display};
 use crate::selector::Selector;
 
 // * for debug only, remove after
@@ -277,11 +277,11 @@ pub struct ParsedNode {
     pub attributes: HashMap<String, String>
 }
 impl ParsedNode {
-    pub fn class_list(&self) -> Vec<&str> {
+    pub fn class_list(&self) -> HashSet<&str> {
         match self.attributes.get("class") {
             // Classes are separated by space
             Some(list) => list.split(' ').collect(),
-            None => Vec::new()
+            None => HashSet::new()
         }
     }
 }
