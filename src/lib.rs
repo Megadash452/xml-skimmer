@@ -1,6 +1,6 @@
 pub mod selector;
 use std::{collections::{HashMap, HashSet}, fmt::Display};
-use crate::selector::Selector;
+use crate::selector::{CommaSeparated, Selector};
 
 // * for debug only, remove after
 const INDENT_AMOUNT: usize = 4;
@@ -20,8 +20,8 @@ where F: FnMut(&ParsedNode) {
 
     // parse selector strings
     let mut handlers = handlers.into_iter().map(|(sel, fun)| {
-        (sel.parse::<Selector>().unwrap(), fun)
-    }).collect::<Vec<(Selector, F)>>();
+        (sel.parse::<CommaSeparated<Selector>>().unwrap(), fun)
+    }).collect::<Vec<(CommaSeparated<Selector>, F)>>();
 
 
     let mut iter = xml_src.chars();

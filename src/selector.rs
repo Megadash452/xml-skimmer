@@ -3,31 +3,84 @@ use crate::ParsedNode;
 
 
 /// Parses a string where a type that can be parsed is separated by commas.
+/// Ignores commas inside **strings** (delimited by single `'` or double `"` quotes).
 /// Also accepts 1 end trailing comma.
+/// 
+/// When matching with a [`ParsedNode`], if any of the inner selectors match the node,
+/// then [`CommaSeparated::match_node()`] returns `true`.
 /// 
 /// ## Example
 /// 
 /// ```
-/// use xml_skimmer::selector::{comma_separated, Selector};
+/// use std::collections::HashMap;
+/// use xml_skimmer::selector::{CommaSeparated, Selector};
 /// 
-/// assert_eq!(comma_separated::<Selector>("tag , tag2 , "), Ok(vec![
+/// assert_eq!("tag , tag2".parse::<CommaSeparated<Selector>>(), Ok(CommaSeparated(vec![
 ///     Selector { tag: "tag".to_string().into(), .. Default::default() },
 ///     Selector { tag: "tag2".to_string().into(), .. Default::default() },
-/// ]));
+/// ])));
+/// 
+/// assert_eq!("tag , tag2 , ".parse::<CommaSeparated<Selector>>(), Ok(CommaSeparated(vec![
+///     Selector { tag: "tag".to_string().into(), .. Default::default() },
+///     Selector { tag: "tag2".to_string().into(), .. Default::default() },
+/// ])));
+/// 
+/// assert_eq!("tag[attr='1, 2, 3']".parse::<CommaSeparated<Selector>>(), Ok(CommaSeparated(vec![
+///     Selector {
+///         tag: "tag".to_string().into(),
+///         attributes: HashMap::from([("attr".to_string(), "1, 2, 3".to_string().into())]),
+///         .. Default::default() },
+/// ])));
 /// ```
-pub fn comma_separated<T: FromStr>(s: &str) -> Result<Vec<T>, T::Err> {
-    let mut rtrn = vec![];
-    let mut splits = s.split(',');
-
-    while let Some(mut s) = splits.next() {
-        s = s.trim();
-        // is not a trailing comma
-        if splits.clone().next() != None || !s.is_empty() {
-            rtrn.push(T::from_str(s.trim())?);
+#[derive(Debug, PartialEq)]
+pub struct CommaSeparated<T: FromStr>(pub Vec<T>);
+impl CommaSeparated<Selector> {
+    pub fn match_node(&self, node: &ParsedNode) -> bool {
+        for selector in &self.0 {
+            if selector.match_node(node) {
+                return true
+            }
         }
-    }
 
-    Ok(rtrn)
+        false
+    }
+}
+impl<T: FromStr> FromStr for CommaSeparated<T> {
+    type Err = T::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut rtrn = vec![];
+
+        let mut start = 0;
+        let mut i = 0;
+        let mut string_quote: Option<char> = None;
+
+        for c in s.chars() {
+            i += 1;
+
+            match (c, string_quote) {
+                // Open string with single or double quotes
+                ('\'' | '"', None) => string_quote = Some(c),
+                // String opened with single or double quotes, and it closes with that same quote
+                ('\'', Some('\'')) | ('"', Some('"')) => string_quote = None,
+                // Found a comma, not in string
+                (',', None) => {
+                    // subtract i - 1 to exclude the comma
+                    rtrn.push(T::from_str(&s[start..(i - 1)].trim())?);
+                    start = i;
+                },
+                _ => {}
+            }
+        }
+
+        // See if there is a T after the last comma
+        let s = s[start..i].trim();
+        if !s.is_empty() {
+            rtrn.push(T::from_str(s)?);
+        }
+
+        Ok(Self(rtrn))
+    }
 }
 
 
@@ -73,15 +126,16 @@ impl Selector {
                 return false
             }
         }
-
-        if let Some(ref id) = self.id {
-            match node.attributes.get("id") {
-                Some(node_id) =>
-                    if *node_id != *id {
-                        return false
-                    },
-                None => return false
-            }
+        
+        match (node.attributes.get("id"), &self.id) {
+            // Both node and selector have an id to match
+            (Some(node_id), Some(id)) =>
+                if *node_id != *id {
+                    return false
+                },
+            // Node doesn't have id
+            (None, Some(_)) => return false,
+            _ => {}
         }
             
         let class_list = node.class_list();

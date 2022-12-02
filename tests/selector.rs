@@ -1,24 +1,25 @@
 use std::collections::{HashMap, HashSet};
-use xml_skimmer::{ParsedNode, selector::Selector};
+use xml_skimmer::{ParsedNode, selector::{CommaSeparated, Selector}};
 
 #[test]
-fn css_selectors() {
-    // let node = ParsedNode{
-    //     tag: String::from("tag"),
-    //     attributes: HashMap::from([
-    //         (String::from("class"), String::from("class cls c")),
-    //         (String::from("id"),    String::from("id")),
-    //         (String::from("attr"),  String::from("val"))
-    //     ])
-    // };
+fn matching() {
+    let node = ParsedNode{
+        tag: String::from("tag"),
+        attributes: HashMap::from([
+            (String::from("class"), String::from("class cls c")),
+            (String::from("id"),    String::from("id")),
+            (String::from("attr"),  String::from("val"))
+        ])
+    };
 
-    // assert_eq!(match_to_node(&node, "tag"), true);
-    // assert_eq!(match_to_node(&node, "tag2, tag"), true);
-    // assert_eq!(match_to_node(&node, ".cls"), true);
-    // assert_eq!(match_to_node(&node, "#id"), true);
-    // assert_eq!(match_to_node(&node, "[attr]"), true);
-    // assert_eq!(match_to_node(&node, "[attr=val]"), true);
-    // assert_eq!(match_to_node(&node, "tag#id.class.cls.c[attr=val]"), true);
+    assert!("tag"                          .parse::<CommaSeparated<Selector>>().unwrap().match_node(&node));
+    assert!("tag2, tag"                    .parse::<CommaSeparated<Selector>>().unwrap().match_node(&node));
+    assert!(".cls"                         .parse::<CommaSeparated<Selector>>().unwrap().match_node(&node));
+    assert!("#id"                          .parse::<CommaSeparated<Selector>>().unwrap().match_node(&node));
+    assert!("[attr]"                       .parse::<CommaSeparated<Selector>>().unwrap().match_node(&node));
+    assert!("[attr=val]"                   .parse::<CommaSeparated<Selector>>().unwrap().match_node(&node));
+    // all combined
+    assert!("tag#id.class.cls.c[attr=val]" .parse::<CommaSeparated<Selector>>().unwrap().match_node(&node));
 }
 
 #[test]
