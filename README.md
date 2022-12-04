@@ -1,6 +1,11 @@
-# XML Parser | Written in Rust
+# XML Skimmer | Written in Rust
+
+Skim through an XML file and find nodes using CSS Selectors.
 
 For now all it can do is parse through regular and self-closing nodes (not including commetns and other default self-closing nodes).
+
+## Handle Nodes
+The `skim_xml` function takes a set of handlers (closures) paired with a CSS selector string. The selectors will try to match nodes as they are being parsed, so when a node that matches one (or more) of the selectors it will call the handler paired with that selector.
 
 ## Performance
 Tested the program running with the [benchmark](src/benchmark.xml) source file, which has 2000 lines, 1000 depth levels, 8 attributes on each level (where 2 of those attrbibutes are overriden). 
@@ -24,6 +29,11 @@ Things that work:
  - [x] Comments
  - [x] Prolog node (`<?xml version="1.0"?>`) (treated as comment)
 
+Things that DON'T work:
+ - [ ] Cdata
+ - [ ] namespaces
+ - [ ] Text nodes
+
 Tested Scenarios:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -42,13 +52,3 @@ Tested Scenarios:
 <tag attr = "val"/>
 <!--comment-->
 ```
-
-Things that DON'T work:
- - [ ] Cdata
- - [ ] namespaces
- - [ ] Text nodes
-
-
-Things not tested:
- - how many nodes can the stack hold
- - nodes with empty tags

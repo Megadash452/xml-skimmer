@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, fmt::Display};
 use crate::selector::{CommaSeparated, Selector};
 
 
-/// Parse an xml source can call handler closures when a node that matches a selector is found.
+/// Skim an XML file. Can call handler closures when a node that matches a selector is found.
 pub fn skim_xml<F>(xml_src: &str, handlers: HashMap<&'static str, F>) -> Result<(), SkimError>
 where F: FnMut(&ParsedNode) {
     let mut stack: Vec<ParsedNode> = vec![];
