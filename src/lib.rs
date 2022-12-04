@@ -2,9 +2,6 @@ pub mod selector;
 use std::{collections::{HashMap, HashSet}, fmt::Display};
 use crate::selector::{CommaSeparated, Selector};
 
-// * for debug only, remove after
-const INDENT_AMOUNT: usize = 4;
-
 
 /// Parse an xml source can call handler closures when a node that matches a selector is found.
 pub fn skim_xml<F>(xml_src: &str, handlers: HashMap<&'static str, F>) -> Result<(), SkimError>
@@ -94,41 +91,34 @@ where F: FnMut(&ParsedNode) {
                     current_node.attributes.insert(current_attr.name, current_attr.value);
                 }
 
-                // Handlers: when a node has been parsed and some data needs to be read from it
-                match node_type {
-                    NodeType::Opening | NodeType::SelfClosing =>
-                        // Check if any selector (keys in the HashMap) matches current_node
-                        for (sel, handler) in handlers.iter_mut() {
-                            if sel.match_node(&current_node) {
-                                handler(&current_node);
-                            }
-                        },
-                    _ => {}
-                }
-
                 // Managing XML Stack
                 match node_type {
-                    // Push ParsedNode to stack
-                    NodeType::Opening => {
-                        print!("{}", " ".repeat((stack.len() * INDENT_AMOUNT) as usize));
-                        println!("{current_node}");
+                    // Doe something if a selector matches the current_node
+                    NodeType::Opening | NodeType::SelfClosing => {
                         stack.push(current_node);
-                    }
-                    NodeType::SelfClosing => {
-                        print!("{}", " ".repeat((stack.len() * INDENT_AMOUNT) as usize));
-                        println!("<\x1b[92m{}\x1b[0m \x1b[36m{:?}\x1b[0m\x1b[91m/\x1b[0m>", current_node.tag, current_node.attributes)
+                        // Handlers: when a node has been parsed and some data needs to be read from it
+                        // Check if any selector (keys in the HashMap) matches current_node
+                        for (sel, handler) in handlers.iter_mut() {
+                            if sel.match_node(&stack) {
+                                handler(stack.last().unwrap());
+                            }
+                        }
+                        // When is self-closing, node is pushed, matched, then removed.
+                        if node_type == NodeType::SelfClosing {
+                            stack.pop();
+                        }
                     }
                     // Pop last ParsedNode.
-                    NodeType::Closing => {
+                    NodeType::Closing =>
                         // Tag of last ParsedNode must be identical to the current/CLOSING_NODE
                         match stack.pop() {
-                            Some(node) if current_node.tag == node.tag => {}
+                            Some(node) if current_node.tag == node.tag => {
+                                // print!("{}", " ".repeat((stack.len() * INDENT_AMOUNT) as usize));
+                                // println!("</\x1b[91m{}\x1b[0m>", node.tag);
+                            }
                             Some(node) => return Err(SkimError::CantCloseNode(current_node.tag, Some(node))),
                             None => return Err(SkimError::CantCloseNode(current_node.tag, None))
-                        }
-                        print!("{}", " ".repeat((stack.len() * INDENT_AMOUNT) as usize));
-                        println!("</\x1b[91m{}\x1b[0m>", current_node.tag);
-                    },
+                        },
                     // NodeType::None will not be reached here
                     NodeType::None => panic!("Found '>' with NodeType::None")
                 }
@@ -140,7 +130,7 @@ where F: FnMut(&ParsedNode) {
                 node_type = NodeType::None;
             }
             
-            ' ' | '\n' | '\t' => {
+            _ if character.is_whitespace() => {
                 // Whitespace only matters in an OPENING_NODE
                 if node_type == NodeType::Opening {
                     match writing_to {

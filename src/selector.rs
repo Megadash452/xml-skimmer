@@ -35,9 +35,9 @@ use crate::ParsedNode;
 #[derive(Debug, PartialEq)]
 pub struct CommaSeparated<T: FromStr>(pub Vec<T>);
 impl CommaSeparated<Selector> {
-    pub fn match_node(&self, node: &ParsedNode) -> bool {
+    pub fn match_node(&self, stack: &[ParsedNode]) -> bool {
         for selector in &self.0 {
-            if selector.match_node(node) {
+            if selector.match_node(stack) {
                 return true
             }
         }
@@ -96,20 +96,26 @@ impl<T: FromStr> FromStr for CommaSeparated<T> {
 /// it will check if it has that attribute,
 /// and also requires that the XML node specifically has an empty string as the value for that attribute.
 /// 
+/// # Combinators
+/// 
+/// The **parent** is the previous selector in the '[`Combinator`] stack'.
+/// For example, with selector `parent > child`, the base selector has **tag** `"child"`,
+/// and it has a **parent** with [`Child`](Combinator::Child) (`>`) with **tag** `"parent"`.
+/// 
+/// See [`Combinator`].
+/// 
 /// # [`FromStr`]
 /// 
-/// Can be parsed from a String (`"".parse::<Selector>()` or `Selector::from_str("")`).
-/// Whitespace is not allowed in parsing (except inside attribute brackets `[]`)
-/// because it is used for node hierarchy, which this struct does not support // TODO: (yet, also '*' and '>' selector operators).
+/// Can be parsed from a String (`"...".parse::<Selector>()` or `Selector::from_str("...")`).
+/// String can contain *leading* and *trailing* `whitespace`.
 /// 
 /// The tag always goes first in the string.
+/// There must only be 1 **tag** and **id** in the string.
 /// 
-/// `classes` is a [`HashSet`] and `attributes` is a [`HashMap`],
+/// **classes** is a [`HashSet`] and `attributes` is a [`HashMap`],
 /// so a class or attribute name must not be found in the string more than once.
-/// Attributes can have no value `[attr]`, or Some value `[attr=val]`,
+/// **attributes** can have no value `[attr]`, or Some value `[attr=val]`,
 /// where the value can be wrapped in single `'` or double `"` quotes.
-/// 
-/// There must only be 1 **id** in the string.
 /// 
 /// See [`SelectorParseError`] for possible errors when parsing from a string.
 #[derive(Debug, Default, PartialEq)]
@@ -117,10 +123,61 @@ pub struct Selector {
     pub tag: Option<String>,
     pub id: Option<String>,
     pub classes: HashSet<String>,
-    pub attributes: HashMap<String, Option<String>>
+    pub attributes: HashMap<String, Option<String>>,
+    pub parent: Option<(Box<Selector>, Combinator)>
 }
 impl Selector {
-    pub fn match_node(&self, node: &ParsedNode) -> bool {
+    pub fn match_node(&self, stack: &[ParsedNode]) -> bool {
+        let mut node_iter = stack.iter().rev();
+        let mut sel_iter = Some(self);
+        let mut combinator = None;
+
+        while let Some(selector) = sel_iter {
+            match combinator {
+                // Some ancestor node in the stack has to match
+                Some(Combinator::Descendant) => {
+                    let mut matched = false;
+                    // Try again for every node until one matches
+                    while let Some(node) = node_iter.next() {
+                        if selector.match_simple(node) {
+                            matched = true;
+                            break
+                        }
+                    }
+
+                    // No node in the stack matched
+                    if !matched {
+                        return false
+                    }
+                },
+                // The directly next node in the stack has to match.
+                // This also happens with the first selector: e.g. "... tag".
+                Some(Combinator::Child) | None =>
+                    match node_iter.next() {
+                        Some(node) =>
+                            if !selector.match_simple(node) {
+                                return false
+                            },
+                        // stack was empty
+                        None => return false
+                    }
+            }
+
+            sel_iter = match &selector.parent {
+                Some((parent, comb)) => {
+                    combinator = Some(*comb);
+                    Some(&*parent)
+                },
+                // finish
+                None => None
+            }
+        }
+
+        true
+    }
+
+    /// Match a single selector without considering combinators.
+    fn match_simple(&self, node: &ParsedNode) -> bool {
         if let Some(ref tag) = self.tag {
             if node.tag != *tag {
                 return false
@@ -175,72 +232,59 @@ impl FromStr for Selector {
         if s.is_empty() {
             return Err(Self::Err::EmptyString)
         }
+        s = s.trim_start();
 
-        let tag = {
-            let (tag, rest) = split_tag(s)?;
-            s = rest;
+        let mut current_sel = Self::default();
 
-            if tag.is_empty() {
-                None
-            } else {
-                Some(tag.to_string())
-            }
-        };
-
-        let mut id: Option<String> = None;
-        let mut classes = HashSet::new();
-        let mut attributes = HashMap::new();
-
-        let mut buf = String::new();
         let mut chars = s.chars();
+        let mut push_to = PushTo::Tag;
+        let mut buf = String::new();
 
-        /// Whether the characters being parsed are for ID, a Class, or an Attribute
-        #[derive(PartialEq)]
-        enum PushTo {
-            Id, Classes, AttrName
-        }
-        impl PushTo {
-            pub fn new(c: char) -> Result<Self, SelectorParseError> {
-                match c {
-                    '#' => Ok(Self::Id),
-                    '.' => Ok(Self::Classes),
-                    '[' => Ok(Self::AttrName),
-                    _ => Err(SelectorParseError::UnknownPrefix)
-                }
+        /// Assign a string to whatever part of the selector it needs to.
+        /// 
+        /// Will return [`Err`] when trying to PushTo [`Id`](PushTo::Id) or [`Classes`](PushTo::Classes) and **buf** is empty.
+        /// This happens when `#` or `.` are the last char of the string.
+        fn push(to: PushTo, sel: &mut Selector, buf: String) -> Result<(), SelectorParseError> {
+            match to {
+                // When push_to is `Tag` and *buf* is empty, push_to should be trated as `None`.
+                PushTo::Tag if buf.is_empty() => {},
+
+                PushTo::Tag =>
+                    match sel.tag {
+                        Some(_) => return Err(SelectorParseError::MultipleTags),
+                        None => sel.tag = Some(buf)
+                    },
+                PushTo::Id =>
+                    match sel.id {
+                        Some(_) => return Err(SelectorParseError::MultipleIDs),
+                        None if !buf.is_empty() => sel.id = Some(buf),
+                        None => return Err(SelectorParseError::EmptyToken)
+                    },
+                PushTo::Classes =>
+                    if !buf.is_empty() {
+                        sel.classes.insert(buf);
+                    } else {
+                        return Err(SelectorParseError::EmptyToken)
+                    },
+                // When one of these chars is in the attribute: [at#tr] or [at.tr] or [at[tr] 
+                PushTo::AttrName => return Err(SelectorParseError::UnclosedBracket)
             }
+            Ok(())
         }
 
-        let mut push_to = PushTo::new(match chars.next() {
-            Some(c) => c,
-            None => return Ok(Self { tag, id, classes, attributes })
-        })?;
-
-        // Find class, id, other attributes
         while let Some(character) = chars.next() {
             match character {
                 '#' | '.' | '[' => {
-                    match push_to {
-                        PushTo::Id => if id.is_some() {
-                            return Err(Self::Err::MultipleIDs)
-                        } else {
-                            id = Some(buf)
-                        },
-                        PushTo::Classes => if !classes.insert(buf) {
-                                // If the set already contained this class
-                                return Err(Self::Err::DuplicateClass)
-                            },
-                        // When one of these chars is in the attribute: [at#tr] or [at.tr] or [at[tr] 
-                        PushTo::AttrName => return Err(Self::Err::UnclosedBracket)
-                    }
-
-                    // reset buffers
+                    // buf could be empty if its the first char in s, or right after a `]`.
+                    push(push_to, &mut current_sel, buf)?;
+                    // Reset buffers
                     buf = String::new();
-                    push_to = PushTo::new(character)?;
+                    push_to = PushTo::new(character);
                 },
                 '=' => match push_to {
                     PushTo::AttrName => {
                         if buf.is_empty() {
-                            return Err(Self::Err::EmptyAttrName)
+                            return Err(Self::Err::EmptyToken)
                         }
                         // skip whitespace before attribute
                         let mut next = None;
@@ -256,7 +300,7 @@ impl FromStr for Selector {
                             Some('"') => Some('"'),
                             Some('\'') => Some('\''),
                             // When there is nothing after EqSign '=': [attr=]
-                            Some(']') => return Err(Self::Err::BadChar),
+                            Some(']' | '=') => return Err(Self::Err::BadChar),
 
                             Some(character) => {
                                 val_buf.push(character);
@@ -319,107 +363,142 @@ impl FromStr for Selector {
                             return Err(Self::Err::UnclosedBracket)
                         }
 
-                        if let Some(_) = attributes.insert(buf, Some(val_buf)) {
-                            // If this attribute already existed
-                            return Err(Self::Err::DuplicateAttr)
-                        }
+                        current_sel.attributes.insert(buf, Some(val_buf));
 
                         // reset buffers
                         buf = String::new();
-                        match chars.next() {
-                            Some(c) => push_to = PushTo::new(c)?,
-                            None => break
-                        }
+                        push_to = PushTo::Tag;
                     },
                     _ => return Err(Self::Err::BadChar)
                 },
+                // When attr has no value: [attr]
                 ']' => match push_to {
                     PushTo::AttrName => {
                         if buf.is_empty() {
-                            return Err(Self::Err::EmptyAttrName)
+                            return Err(Self::Err::EmptyToken)
                         }
-                        if let Some(_) = attributes.insert(buf, None) {
-                            // If this attribute already existed
-                            return Err(Self::Err::DuplicateAttr)
-                        }
+                        current_sel.attributes.insert(buf, None);
 
-                        // reset buffers
+                        // Reset buffers
                         buf = String::new();
-                        match chars.next() {
-                            Some(c) => push_to = PushTo::new(c)?,
-                            None => break
-                        }
+                        push_to = PushTo::Tag;
                     },
-                    _ => return Err(Self::Err::BadChar)
+                    _ => return Err(Self::Err::BadChar/*(c)*/)
                 },
-                // whitespace is only allowed in attributes (and is ignored)
+                // Whitespace inside attributes is ignored,
+                // otherwise, it means the next tokens will go to a child selector 
                 _ if character.is_whitespace() =>
                     if push_to != PushTo::AttrName {
-                        return Err(Self::Err::WhiteSpace)
+                        // buf could be empty if its the first char in s, or right after a `]`.
+                        push(push_to, &mut current_sel, buf)?;
+                        // reset buffer
+                        buf = String::new();
+
+                        // the first char of the next child selector
+                        let mut first_c = None;
+                        let mut combinator = Combinator::Descendant;
+                        // Look for the combinator within the whitespace.
+                        // If there is only whitespace, combinator is Descendant.
+                        // Also parse through the trailing whitespace of the combinator.
+                        while let Some(c) = chars.next() {
+                            match c {
+                                '>' => // Check if a combinator was already found
+                                    if combinator == Combinator::Descendant {
+                                        combinator = Combinator::Child;
+                                    } else {
+                                        // When have this situation: "tag > >..."
+                                        // Combinators cannot be used as prefixes.
+                                        return Err(SelectorParseError::UnknownPrefix)
+                                    },
+                                _ if c.is_whitespace() => {},
+                                _ => {
+                                    first_c = Some(c);
+                                    break
+                                }
+                            }
+                        }
+
+                        let c = match first_c {
+                            Some(c) => c,
+                            // Selector ends with trailing whitespace
+                            None if combinator == Combinator::Descendant => return Ok(current_sel),
+                            None => return Err(Self::Err::NoOtherSideCombinator)
+                        };
+                        push_to = PushTo::new(c);
+                        if push_to == PushTo::Tag {
+                            buf.push(c)
+                        }
+
+                        // Set current selector to parent of a new selector.
+                        current_sel = Self {
+                            parent: Some((Box::new(current_sel), combinator)),
+                            ..Default::default()
+                        }
                     },
+                // Any punct char (except `-` and `_`) is considered a prefix or combinator
+                _ if character.is_ascii_punctuation()
+                    && character != '-'
+                    && character != '_' => return Err(Self::Err::UnknownPrefix),
                 _ => buf.push(character)
             }
         }
 
         // When reached the end of the string, push what is in the buffer
-        if !buf.is_empty() {
-            match push_to {
-                PushTo::Id => if id.is_some() {
-                    return Err(Self::Err::MultipleIDs)
-                } else {
-                    id = Some(buf)
-                },
-                PushTo::Classes => if !classes.insert(buf) {
-                    // If the set already contained this class
-                    return Err(Self::Err::DuplicateClass)
-                },
-                // When one of these chars is in the attribute: [at#tr] or [at.tr] or [at[tr] 
-                PushTo::AttrName => return Err(Self::Err::UnclosedBracket)
-            }
-        }
-
-        Ok(Self { tag, id, classes, attributes })
+        push(push_to, &mut current_sel, buf)?;
+        
+        Ok(current_sel)
     }
-}
-
-
-/// Get the slice that represents the tag in a css selector, and also the slice after.
-/// - e.g.: `tag#id.cls[attr=val]` -> (`tag`, `#id.cls[attr=val]`)
-/// 
-/// The **tag** ends before a [`punctuation`] character. Whitespace is not allowed.
-fn split_tag(selector: &str) -> Result<(&str, &str), SelectorParseError> {
-    // The end index of the tag slice
-    let mut end = 0;
-
-    for character in selector.chars() {
-        if character.is_ascii_punctuation() {
-            return Ok((&selector[..end], &selector[end..]))
-        }
-        if character.is_whitespace() {
-            return Err(SelectorParseError::WhiteSpace)
-        }
-        end += 1
-    }
-
-    // The entire selector is the tag
-    return Ok((selector, ""))
 }
 
 
 #[derive(Debug, PartialEq)]
 pub enum SelectorParseError {
+    MultipleTags,
     MultipleIDs,
-    DuplicateClass, // ? might remove
-    DuplicateAttr, // ? might remove
-    EmptyAttrName,
+    /// When the last char of the string was `#`, or `.`,
+    /// Or when have empty brackets: `[]`. Therefore,
+    /// this happens when trying to create an **Id**, **Class**, or **Attribute**
+    /// but their strings would be empty.
+    EmptyToken,
     /// When there is a punctuation that is not
     /// `#`, `.`, or `[` in the selector string.
     UnknownPrefix,
     UnclosedString,
     UnclosedBracket,
+    /// When found a combinator, but there is no selector after it.
+    NoOtherSideCombinator,
     /// A [`char`] was found in a position
     /// that it wasn't supposed to be in.
     BadChar,
     WhiteSpace,
     EmptyString,
+}
+
+/// Separates [`Selector`]s to match [`Node`](ParsedNode)s in different ways.
+/// `SelectorA <Combinator> SelectorB`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Combinator {
+    /// Is denoted by `>`.
+    /// The selector will only match nodes `B`
+    /// that are direct children of a node that matches `A`.
+    Child,
+    /// Is denoted by `whitespace`.
+    /// The selector nodes `B` if one of its ancestors matches `A`.
+    Descendant
+}
+
+
+#[derive(PartialEq)]
+enum PushTo {
+    Tag, Id, Classes, AttrName
+}
+impl PushTo {
+    pub fn new(c: char) -> Self {
+        match c {
+            '#' => Self::Id,
+            '.' => Self::Classes,
+            '[' => Self::AttrName,
+            _ => Self::Tag
+        }
+    }
 }
